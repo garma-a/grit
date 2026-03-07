@@ -1,0 +1,21 @@
+{
+  "name": "@garma-a/grit",
+  "version": "1.0.0",
+  "bin": {
+    "grit": "./src/index.ts"
+  },
+  "module": "src/index.ts",
+  "type": "module",
+  "private": false,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1"
+  }
+}
