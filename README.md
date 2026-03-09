@@ -1,15 +1,41 @@
 # grit
 
-To install dependencies:
+### it is CLI Tool for tracking you four most important hapits save them and do data analysis showing you you your performance 
 
-```bash
-bun install
+you can install it using this command
+```sh
+npm i -g @garma-a/grit
+
 ```
 
-To run:
+#### The dahsboard  using `grit command`
 
-```bash
-bun run index.ts
-```
+![](./imgs/grit_dashboard.png)
 
-This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+
+### The Problem solving tracking system
+
+![](./imgs/grit_problem_solving.png)
+
+
+### You can see graphs for the last 30 days
+
+![](./imgs/grit_graphs_problem_solving.png)
+
+#### The same feature exists for the reading , building ,courses the 4 most important habits 
+
+![](./imgs/grit_reading_graph.png)
+
+![](./imgs/grit_courses_graph.png)
+
+#### You can see every detail about your hapits formated by the date using `grit status`
+
+![](./imgs/full_history.png)
+
+
+#### if you want to see all the features and commands avilable you can use `grit --help`
+
+
+
+
+
