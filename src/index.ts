@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { Command } from 'commander';
 import { getConfig, promptForConfig, saveConfig } from './config.js';
 import { loadData, getTodayDateString, updateStats, saveData } from './storage.js';

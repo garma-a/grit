@@ -1,0 +1,14 @@
+# Data files
+.gritdata.json
+.gritconfig
+
+# Source (dist is published instead)
+src/
+
+# Dev files
+tsconfig.json
+tsconfig.build.json
+bun.lock
+node_modules/
+.gitignore
+.git/
