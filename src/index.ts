@@ -5,16 +5,21 @@ import { loadData, getTodayDateString, updateStats, saveData } from './storage.j
 import { runDashboard, showHistory, showStatistics } from './ui.js';
 import color from 'picocolors';
 import * as p from '@clack/prompts';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { statSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 
 const program = new Command();
 
 program
   .name('grit')
   .description('A fantastic CLI habit tracker')
-  .version('1.0.0')
+  .version(pkg.version)
   .addHelpText('after', `
 Keyboard Shortcuts for Dashboard:
   p - Log Problem Solving

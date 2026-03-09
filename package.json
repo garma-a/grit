@@ -1,6 +1,6 @@
 {
   "name": "@garma-a/grit",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "bin": {
     "grit": "./dist/index.js"
   },
