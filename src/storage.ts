@@ -24,11 +24,13 @@ export interface ReadingLog {
   category: string; // e.g., 'Backend', 'Testing'
   topic: string; // e.g., 'GraphQL', 'Jest'
   pages?: number;
+  sections?: number; // for docs: number of sections read
 }
 
 export interface LearningLog {
   category: string;
   topic: string;
+  duration?: number; // duration in minutes
 }
 
 export interface CodingLog {
@@ -65,11 +67,7 @@ export interface GritData {
 }
 
 export function getTodayDateString(): string {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
 }
 
 export function getNextOrPrevDay(dateStr: string, offsetDays: number): string {
@@ -77,17 +75,17 @@ export function getNextOrPrevDay(dateStr: string, offsetDays: number): string {
   const y = parseInt(parts[0] || '0', 10);
   const m = parseInt(parts[1] || '0', 10);
   const d = parseInt(parts[2] || '0', 10);
-  const date = new Date(y, m - 1, d);
-  date.setDate(date.getDate() + offsetDays);
-  const yr = date.getFullYear();
-  const mo = String(date.getMonth() + 1).padStart(2, '0');
-  const da = String(date.getDate()).padStart(2, '0');
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  const yr = date.getUTCFullYear();
+  const mo = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const da = String(date.getUTCDate()).padStart(2, '0');
   return `${yr}-${mo}-${da}`;
 }
 
 export function migrateV1ToV2(v1Data: any): GritData {
   const oldHistory = v1Data.history as V1DailyEntry[];
-  
+
   const newHistory: DailyEntry[] = oldHistory.map(old => {
     const entry: DailyEntry = {
       date: old.date,
@@ -103,9 +101,9 @@ export function migrateV1ToV2(v1Data: any): GritData {
       entry.problemSolving.push({ difficulty: 'unknown', count: 1, topics: ['Legacy Entry'] });
     }
     if (old.habits?.reading?.done) {
-      entry.reading.push({ 
-        type: old.habits.reading.pages ? 'book' : 'article', 
-        category: 'Uncategorized', 
+      entry.reading.push({
+        type: old.habits.reading.pages ? 'book' : 'article',
+        category: 'Uncategorized',
         topic: old.habits.reading.topic || 'Legacy Reading',
         pages: old.habits.reading.pages
       });
@@ -114,10 +112,10 @@ export function migrateV1ToV2(v1Data: any): GritData {
       entry.learning.push({ category: 'Uncategorized', topic: old.habits.learning.topic || 'Legacy Learning' });
     }
     if (old.habits?.coding?.done) {
-      entry.coding.push({ 
-        category: 'Uncategorized', 
-        topic: old.habits.coding.topic || 'Legacy Coding', 
-        timeSpent: old.habits.coding.timeSpent || 'unknown' 
+      entry.coding.push({
+        category: 'Uncategorized',
+        topic: old.habits.coding.topic || 'Legacy Coding',
+        timeSpent: old.habits.coding.timeSpent || 'unknown'
       });
     }
 
@@ -201,7 +199,7 @@ export function computeDailySuccessAndScore(entry: DailyEntry): void {
 
 export function calculateStreak(history: DailyEntry[]): { current: number; highest: number } {
   if (history.length === 0) return { current: 0, highest: 0 };
-  
+
   const successMap = new Map<string, boolean>();
   for (const entry of history) {
     computeDailySuccessAndScore(entry);
@@ -209,50 +207,50 @@ export function calculateStreak(history: DailyEntry[]): { current: number; highe
       successMap.set(entry.date, true);
     }
   }
-  
+
   let current = 0;
   let highest = 0;
-  
+
   const dates = Array.from(successMap.keys()).sort();
   if (dates.length > 0) {
     let tempStreak = 1;
     highest = 1;
     for (let i = 1; i < dates.length; i++) {
-        const prev = dates[i - 1];
-        const expectedNext = getNextOrPrevDay(prev as string, 1);
-        
-        if (dates[i] === expectedNext) {
-            tempStreak++;
-            if (tempStreak > highest) highest = tempStreak;
-        } else {
-            tempStreak = 1;
-        }
+      const prev = dates[i - 1];
+      const expectedNext = getNextOrPrevDay(prev as string, 1);
+
+      if (dates[i] === expectedNext) {
+        tempStreak++;
+        if (tempStreak > highest) highest = tempStreak;
+      } else {
+        tempStreak = 1;
+      }
     }
   }
-  
+
   const todayStr = getTodayDateString();
   const yesterdayStr = getNextOrPrevDay(todayStr, -1);
-  
+
   let checkDateStr = todayStr;
   if (!successMap.has(todayStr) && successMap.has(yesterdayStr)) {
     checkDateStr = yesterdayStr;
   } else if (!successMap.has(todayStr) && !successMap.has(yesterdayStr)) {
-      return { current: 0, highest };
+    return { current: 0, highest };
   }
-  
+
   while (true) {
     if (successMap.has(checkDateStr)) {
-        current++;
-        checkDateStr = getNextOrPrevDay(checkDateStr, -1);
+      current++;
+      checkDateStr = getNextOrPrevDay(checkDateStr, -1);
     } else {
-        break;
+      break;
     }
   }
 
   if (current > highest) {
-      highest = current;
+    highest = current;
   }
-  
+
   return { current, highest };
 }
 

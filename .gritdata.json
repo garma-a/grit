@@ -1,7 +1,7 @@
 {
   "version": 2,
   "stats": {
-    "currentStreak": 1,
+    "currentStreak": 0,
     "highestStreak": 1
   },
   "categories": {
@@ -10,17 +10,20 @@
       "Testing",
       "Database",
       "Security",
-      "Frontend"
+      "Frontend",
+      "job market"
     ],
     "learning": [
       "System Design",
       "Algorithms",
-      "Languages"
+      "Languages",
+      "backend"
     ],
     "coding": [
       "API",
       "UI",
-      "Scripting"
+      "Scripting",
+      "CLI"
     ],
     "problems": [
       "Easy",
@@ -35,28 +38,6 @@
       "date": "2026-03-07",
       "problemSolving": [
         {
-          "difficulty": "unknown",
-          "count": 1,
-          "topics": [
-            "Legacy Entry"
-          ]
-        },
-        {
-          "difficulty": "Medium",
-          "count": 1,
-          "topics": [
-            "arrays"
-          ]
-        },
-        {
-          "difficulty": "Medium",
-          "count": 1,
-          "topics": [
-            "math",
-            "arrays"
-          ]
-        },
-        {
           "difficulty": "Medium",
           "count": 1,
           "topics": [
@@ -66,27 +47,61 @@
       ],
       "reading": [
         {
+          "type": "article",
+          "category": "Testing",
+          "topic": "unit testing using jest"
+        },
+        {
+          "type": "docs",
+          "category": "Backend",
+          "topic": "Nest"
+        },
+        {
           "type": "book",
-          "category": "Uncategorized",
-          "topic": "testing",
-          "pages": 3
+          "category": "Backend",
+          "topic": "Nest",
+          "pages": 4
         }
       ],
       "learning": [
         {
-          "category": "Uncategorized",
-          "topic": "i opened totorual but it is the intor of big backend course so still not learning any thing yet"
+          "category": "backend",
+          "topic": "intorduction"
         }
       ],
       "coding": [
         {
-          "category": "Uncategorized",
-          "topic": "practice unit testing on express api",
-          "timeSpent": "1 hour"
+          "category": "CLI",
+          "topic": "grit",
+          "timeSpent": "1"
         }
       ],
       "score": 4,
       "success": true
+    },
+    {
+      "date": "2026-03-08",
+      "problemSolving": [],
+      "reading": [
+        {
+          "type": "article",
+          "category": "job market",
+          "topic": "fresh backend job status"
+        }
+      ],
+      "learning": [],
+      "coding": [],
+      "score": 1,
+      "success": false
+    },
+    {
+      "date": "2026-03-09",
+      "problemSolving": [],
+      "reading": [],
+      "learning": [],
+      "coding": [],
+      "score": 0,
+      "success": false
     }
   ]
 }
