@@ -253,11 +253,18 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
       let pages;
       let sections;
       if (type === 'book') {
-        const pg = await p.text({ message: 'How many pages did you read?' });
-        if (!p.isCancel(pg) && pg) pages = parseInt(pg as string) || undefined;
+        const pg = await p.text({ 
+          message: 'How many pages did you read? (e.g. 5, 20)',
+          validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
+        });
+        if (!p.isCancel(pg) && typeof pg === 'string' && pg) pages = parseInt(pg) || undefined;
       } else if (type === 'docs') {
-        const sec = await p.text({ message: 'How many sections did you read?', placeholder: 'e.g., 2' });
-        if (!p.isCancel(sec) && sec) sections = parseInt(sec as string) || undefined;
+        const sec = await p.text({ 
+          message: 'How many sections did you read?', 
+          placeholder: 'e.g., 2',
+          validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
+        });
+        if (!p.isCancel(sec) && typeof sec === 'string' && sec) sections = parseInt(sec) || undefined;
       }
 
       entry.reading.push({
@@ -278,17 +285,11 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
       const topic = await promptTopic('What exactly did you learn?', pastTopics);
       if (!topic) continue;
 
-      const dur = await p.select({
-        message: 'How long was the video/course?',
-        options: [
-          { value: '15', label: '≤ 15 minutes' },
-          { value: '30', label: '≤ 30 minutes' },
-          { value: '60', label: '30 min – 1 hour' },
-          { value: '120', label: '1 – 2 hours' },
-          { value: '180', label: '2+ hours' }
-        ]
+      const dur = await p.text({
+        message: 'How many minutes was the video/course? (e.g. 30, 60)',
+        validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 45)'
       });
-      const duration = p.isCancel(dur) ? undefined : parseInt(dur as string);
+      const duration = (p.isCancel(dur) || typeof dur !== 'string' || !dur) ? undefined : parseInt(dur);
 
       entry.learning.push({
         category: newCategory,
@@ -306,13 +307,17 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
       const topic = await promptTopic('What did you build?', pastTopics);
       if (!topic) continue;
 
-      const timeSpent = await p.text({ message: 'How much time did you spend?' });
-      if (p.isCancel(timeSpent)) continue;
+      const timeSpentInput = await p.text({ 
+        message: 'How many minutes did you spend coding? (e.g. 30, 45, 90)',
+        validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 60)'
+      });
+      if (p.isCancel(timeSpentInput) || typeof timeSpentInput !== 'string' || !timeSpentInput) continue;
+      const timeSpent = parseInt(timeSpentInput) || 0;
 
       entry.coding.push({
         category: newCategory,
         topic: (topic as string).trim(),
-        timeSpent: (timeSpent as string).trim()
+        timeSpent
       });
     }
 
@@ -523,7 +528,10 @@ export async function showHistory(data: GritData, all: boolean): Promise<void> {
 
     // Coding entries
     for (const c of entry.coding) {
-      console.log(`  💻 You coded on ${color.cyan(c.category)} — topic: ${color.white(c.topic)} (${c.timeSpent})`);
+      let timeStr = typeof c.timeSpent === 'number' 
+        ? (c.timeSpent >= 60 ? `${Math.floor(c.timeSpent / 60)}h${c.timeSpent % 60 > 0 ? ` ${c.timeSpent % 60}min` : ''}` : `${c.timeSpent}min`)
+        : (c.timeSpent || 'unknown time');
+      console.log(`  💻 You coded on ${color.cyan(c.category)} — topic: ${color.white(c.topic)} (${timeStr})`);
     }
 
     // Daily summary

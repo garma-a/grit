@@ -36,7 +36,7 @@ export interface LearningLog {
 export interface CodingLog {
   category: string;
   topic: string;
-  timeSpent: string;
+  timeSpent: number; // minutes
 }
 
 export interface DailyEntry {
@@ -115,7 +115,7 @@ export function migrateV1ToV2(v1Data: any): GritData {
       entry.coding.push({
         category: 'Uncategorized',
         topic: old.habits.coding.topic || 'Legacy Coding',
-        timeSpent: old.habits.coding.timeSpent || 'unknown'
+        timeSpent: parseInt(old.habits.coding.timeSpent || '0') || 0
       });
     }
 
