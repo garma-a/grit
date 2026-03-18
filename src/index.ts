@@ -26,7 +26,9 @@ Keyboard Shortcuts for Dashboard:
   r - Log Reading
   l - Log Learning
   c - Log Coding
-  s - View Statistics (Graphs + Summaries)
+  g - Good Habits Check-In
+  b - Bad Habits Reflection
+  s - View Detailed Overview
   t - Clear Today's Habits
   a - Clear All History
   h - Show Keyboard Shortcuts
@@ -36,9 +38,9 @@ CLI Commands:
   grit              Open the interactive dashboard
   grit status       Day-by-day activity history (last 30 days)
   grit status -a    Show all history
-  grit graphs       Combined graphs & summaries (last 30 days)
+  grit graphs       Detailed overview (last 30 days)
   grit graphs -y    Last year graphs
-  grit graphs -a    All time graphs
+  grit graphs -a    All time detailed overview
   grit import       Import existing .gritdata.json from another device
   grit config       Change data storage path
   grit clear        Clear history
@@ -83,6 +85,7 @@ program
   .description('Import an existing .gritdata.json file (e.g. from another device)')
   .action(async (filepath?: string) => {
     p.intro(color.bgCyan(color.black(' Grit Import ')));
+
 
     let targetPath = filepath;
 
@@ -166,7 +169,7 @@ program
 
 program
   .command('graphs')
-  .description('Show combined statistics: graphs + summaries')
+  .description('Show detailed overview for your selected period')
   .option('-a, --all', 'Show all-time stats')
   .option('-y, --year', 'Show last year stats')
   .option('-d, --days <n>', 'Show last N days', '30')

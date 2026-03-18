@@ -30,6 +30,18 @@ function getTheme(streak: number) {
   };
 }
 
+function toYesNo(value: boolean | undefined): string {
+  if (value === true) return color.green('Yes');
+  if (value === false) return color.red('No');
+  return color.dim('Not logged');
+}
+
+function centerLine(text: string, width = process.stdout.columns || 100): string {
+  const plain = text.replace(/\x1B\[[0-9;]*m/g, '');
+  const left = Math.max(0, Math.floor((width - plain.length) / 2));
+  return `${' '.repeat(left)}${text}`;
+}
+
 async function promptCategory(message: string, options: string[]): Promise<string | null> {
   const choices = options.map(opt => ({ value: opt, label: opt }));
   choices.unshift({ value: '__NEW__', label: '+ Type a new category...' });
@@ -156,7 +168,7 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
     const styledArt = color.bold(theme.fg(asciiArt));
 
     console.log(
-      boxen(`${styledArt}\n\n${color.bold('DASHBOARD V0.1')}\n${streakText}`, {
+      boxen(`${styledArt}\n\n${color.bold('GRIT COMMAND CENTER')}\n${color.dim('Focused daily execution')}\n\n${streakText}`, {
         padding: { top: 1, bottom: 1, left: 4, right: 4 },
         margin: { bottom: 1, top: 1 },
         borderStyle: 'bold',
@@ -182,17 +194,19 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
     if (entry.coding.length > 0) currentScore++;
 
     const dashboardChoice = await p.selectKey({
-      message: `What would you like to do? (Today's Score: ${currentScore}/4) [Press Key]`,
+      message: centerLine(`What would you like to do? (Today's Score: ${currentScore}/4)`, process.stdout.columns || 100),
       options: [
-        { value: 'p', label: `[p] 🧩 Log Problem Solving (${entry.problemSolving.length} done)` },
-        { value: 'r', label: `[r] 📖 Log Reading (${entry.reading.length} done)` },
-        { value: 'l', label: `[l] 🎓 Log Learning (${entry.learning.length} done)` },
-        { value: 'c', label: `[c] 💻 Log Coding (${entry.coding.length} done)` },
-        { value: 's', label: '[s] 📊 View Statistics (Graphs + Summaries)' },
-        { value: 't', label: "[t] 🗑️ Clear Today's Habits" },
-        { value: 'a', label: '[a] ⚠️ Clear All History' },
-        { value: 'h', label: '[h] ⌨️ Show Keyboard Shortcuts' },
-        { value: 'e', label: '[e] 🚪 Exit' }
+        { value: 'p', label: centerLine(`[p] 🧩 Problem Solving (${entry.problemSolving.length} logged)`) },
+        { value: 'r', label: centerLine(`[r] 📚 Reading (${entry.reading.length} logged)`) },
+        { value: 'l', label: centerLine(`[l] 🎓 Learning (${entry.learning.length} logged)`) },
+        { value: 'c', label: centerLine(`[c] 💻 Coding (${entry.coding.length} logged)`) },
+        { value: 'g', label: centerLine('[g] 🌅 Good Habits Check-In') },
+        { value: 'b', label: centerLine('[b] 🚫 Bad Habits Reflection') },
+        { value: 's', label: centerLine('[s] 📋 Detailed Overview') },
+        { value: 't', label: centerLine("[t] 🗑️ Clear Today's Habits") },
+        { value: 'a', label: centerLine('[a] ⚠️ Clear All History') },
+        { value: 'h', label: centerLine('[h] ⌨️ Keyboard Shortcuts') },
+        { value: 'e', label: centerLine('[e] 🚪 Exit') }
       ]
     });
 
@@ -321,9 +335,92 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
       });
     }
 
+    else if (dashboardChoice === 'g') {
+      const woke = await p.confirm({
+        message: 'Did you wake up early today?',
+        initialValue: false
+      });
+      if (p.isCancel(woke)) continue;
+
+      entry.goodHabits.wokeUpEarly = woke as boolean;
+
+      if (woke) {
+        const wakeTime = await p.text({
+          message: 'At what time did you wake up? (HH:MM)',
+          placeholder: '06:30',
+          validate: (val) => /^([01]?\d|2[0-3]):[0-5]\d$/.test((val || '').trim()) ? undefined : 'Use HH:MM format (e.g. 06:30)'
+        });
+        if (!p.isCancel(wakeTime)) {
+          entry.goodHabits.wakeUpTime = (wakeTime as string).trim();
+        }
+      }
+
+      const didSport = await p.confirm({
+        message: 'Did you do sport today?',
+        initialValue: false
+      });
+      if (p.isCancel(didSport)) continue;
+      entry.goodHabits.didSport = didSport as boolean;
+
+      if (didSport) {
+        const sportMinutes = await p.text({
+          message: 'How many minutes of sport?',
+          placeholder: '30',
+          validate: (val) => /^\d+$/.test((val || '').trim()) ? undefined : 'Enter minutes as a number'
+        });
+        if (!p.isCancel(sportMinutes)) {
+          entry.goodHabits.sportMinutes = parseInt(sportMinutes as string, 10) || 0;
+        }
+      }
+    }
+
+    else if (dashboardChoice === 'b') {
+      const watchedPorn = await p.confirm({
+        message: 'Did you watch porn today?',
+        initialValue: false
+      });
+      if (p.isCancel(watchedPorn)) continue;
+      entry.badHabits.watchedPorn = watchedPorn as boolean;
+
+      if (watchedPorn) {
+        const pornReason = await p.text({
+          message: 'Why did it happen today?',
+          placeholder: 'Stress / boredom / habit loop...'
+        });
+        if (!p.isCancel(pornReason) && typeof pornReason === 'string') {
+          entry.badHabits.pornReason = pornReason.trim();
+        }
+      } else {
+        entry.badHabits.pornReason = undefined;
+      }
+
+      const entertainmentHoursInput = await p.text({
+        message: 'How many hours did you spend on movies/anime/games today?',
+        placeholder: '2',
+        validate: (val) => /^\d+(\.\d+)?$/.test((val || '').trim()) ? undefined : 'Enter a number (e.g. 2 or 4.5)'
+      });
+      if (p.isCancel(entertainmentHoursInput)) continue;
+
+      const entertainmentHours = parseFloat(entertainmentHoursInput as string) || 0;
+      entry.badHabits.entertainmentHours = entertainmentHours;
+      entry.badHabits.entertainmentOveruse = entertainmentHours > 4;
+
+      if (entertainmentHours > 4) {
+        const entertainmentReason = await p.text({
+          message: 'You crossed 4 hours. Why did that happen?',
+          placeholder: 'Energy drop / no plan / social...'
+        });
+        if (!p.isCancel(entertainmentReason) && typeof entertainmentReason === 'string') {
+          entry.badHabits.entertainmentReason = entertainmentReason.trim();
+        }
+      } else {
+        entry.badHabits.entertainmentReason = undefined;
+      }
+    }
+
     else if (dashboardChoice === 's') {
       const period = await p.select({
-        message: 'Select time period for statistics:',
+        message: 'Select time period for the detailed overview:',
         options: [
           { value: '30', label: 'Last 30 days' },
           { value: '365', label: 'Last year' },
@@ -344,7 +441,9 @@ Keyboard Shortcuts:
   [r] Log Reading
   [l] Log Learning
   [c] Log Coding
-  [s] View Statistics (Graphs + Summaries)
+  [g] Log Good Habits Check-In
+  [b] Log Bad Habits Reflection
+  [s] View Detailed Overview
   [t] Clear Today's Habits
   [a] Clear All History
   [h] Show Keyboard Shortcuts
@@ -365,6 +464,8 @@ Keyboard Shortcuts:
         entry.reading = [];
         entry.learning = [];
         entry.coding = [];
+        entry.goodHabits = {};
+        entry.badHabits = {};
         entry.score = 0;
         entry.success = false;
 
@@ -532,6 +633,20 @@ export async function showHistory(data: GritData, all: boolean): Promise<void> {
         ? (c.timeSpent >= 60 ? `${Math.floor(c.timeSpent / 60)}h${c.timeSpent % 60 > 0 ? ` ${c.timeSpent % 60}min` : ''}` : `${c.timeSpent}min`)
         : (c.timeSpent || 'unknown time');
       console.log(`  💻 You coded on ${color.cyan(c.category)} — topic: ${color.white(c.topic)} (${timeStr})`);
+    }
+
+    if (entry.goodHabits && (entry.goodHabits.wokeUpEarly !== undefined || entry.goodHabits.didSport !== undefined)) {
+      console.log(`  🌅 Good habits — woke up early: ${toYesNo(entry.goodHabits.wokeUpEarly)}${entry.goodHabits.wakeUpTime ? ` at ${color.cyan(entry.goodHabits.wakeUpTime)}` : ''}`);
+      console.log(`  🏃 Good habits — did sport: ${toYesNo(entry.goodHabits.didSport)}${entry.goodHabits.sportMinutes ? ` (${entry.goodHabits.sportMinutes} min)` : ''}`);
+    }
+
+    if (entry.badHabits && (entry.badHabits.watchedPorn !== undefined || entry.badHabits.entertainmentHours !== undefined)) {
+      console.log(`  🚫 Bad habits — watched porn: ${toYesNo(entry.badHabits.watchedPorn)}${entry.badHabits.pornReason ? ` (${color.dim(entry.badHabits.pornReason)})` : ''}`);
+      const hours = entry.badHabits.entertainmentHours;
+      const overuse = entry.badHabits.entertainmentOveruse;
+      if (hours !== undefined) {
+        console.log(`  🎮 Bad habits — entertainment: ${color.bold(hours.toString())}h${overuse ? color.red(' (over 4h)') : color.green(' (in range)')}${entry.badHabits.entertainmentReason ? ` (${color.dim(entry.badHabits.entertainmentReason)})` : ''}`);
+      }
     }
 
     // Daily summary
@@ -1233,54 +1348,168 @@ export function show6MonthSummary(data: GritData): void {
 
 // ─── Combined Statistics View ───
 export function showStatistics(data: GritData, period: string): void {
-  const termWidth = process.stdout.columns || 80;
-
   console.clear();
 
-  const asciiArt = figlet.textSync('STATS', { font: 'Small' });
-  console.log(
-    boxen(color.bold(color.cyan(asciiArt)), {
-      padding: { top: 0, bottom: 0, left: 2, right: 2 },
-      margin: { top: 1, bottom: 0 },
-      borderStyle: 'bold',
-      borderColor: 'cyan',
-      textAlignment: 'center',
-      float: 'center'
-    })
-  );
-
   const periodLabel = period === '30' ? 'Last 30 Days' : period === '365' ? 'Last Year' : 'All Time';
-  console.log(color.dim(`\n${'─'.repeat(termWidth)}`));
-  console.log(color.bold(color.white(`  📊 Statistics — ${periodLabel}`)));
-  console.log(color.dim('─'.repeat(termWidth)));
+  const todayStr = getTodayDateString();
+  const cutoff = period === 'all' ? null : getNextOrPrevDay(todayStr, -(parseInt(period, 10) || 30));
+  const entries = cutoff ? data.history.filter(e => e.date >= cutoff) : data.history;
 
-  // ── Graph 1: Problems ──
-  console.log(color.bold(color.blue('\n  ━━━ 🧩 PROBLEMS SOLVED ━━━\n')));
-  showProblemsGraph(data, period);
+  let totalProblems = 0;
+  let totalReading = 0;
+  let totalLearningMin = 0;
+  let totalCodingMin = 0;
+  let activeDays = 0;
+  let successDays = 0;
 
-  console.log(color.dim('\n' + '─'.repeat(termWidth)));
+  let wokeEarlyDays = 0;
+  let wokeLoggedDays = 0;
+  let sportDays = 0;
+  let sportMinutes = 0;
 
-  // ── Graph 2: Reading ──
-  console.log(color.bold(color.yellow('\n  ━━━ 📖 READING ACTIVITY ━━━\n')));
-  showReadingGraph(data, period);
+  let pornDays = 0;
+  let pornLoggedDays = 0;
+  let entertainmentHoursTotal = 0;
+  let overuseDays = 0;
 
-  console.log(color.dim('\n' + '─'.repeat(termWidth)));
+  const problemTopics = new Map<string, number>();
+  const readingCategories = new Map<string, number>();
+  const codingCategories = new Map<string, number>();
 
-  // ── Graph 3: Learning ──
-  console.log(color.bold(color.magenta('\n  ━━━ 🎓 LEARNING / COURSES ━━━\n')));
-  showLearningGraph(data, period);
+  for (const e of entries) {
+    const hasCoreActivity = e.problemSolving.length > 0 || e.reading.length > 0 || e.learning.length > 0 || e.coding.length > 0;
+    if (hasCoreActivity) activeDays++;
+    computeDailySuccessAndScore(e);
+    if (e.success) successDays++;
 
-  console.log(color.dim('\n' + '─'.repeat(termWidth)));
+    for (const ps of e.problemSolving) {
+      totalProblems += ps.count;
+      for (const t of ps.topics) {
+        problemTopics.set(t, (problemTopics.get(t) || 0) + ps.count);
+      }
+    }
 
-  // ── 30-Day Summary ──
-  console.log(color.bold(color.cyan('\n  ━━━ 📝 DETAILED 30-DAY SUMMARY ━━━\n')));
-  show30DaySummary(data);
+    for (const r of e.reading) {
+      totalReading++;
+      readingCategories.set(r.category, (readingCategories.get(r.category) || 0) + 1);
+    }
 
-  console.log(color.dim('\n' + '─'.repeat(termWidth)));
+    for (const l of e.learning) {
+      totalLearningMin += (l.duration || 30);
+    }
 
-  // ── 6-Month Summary ──
-  console.log(color.bold(color.green('\n  ━━━ 📈 6-MONTH OVERVIEW ━━━\n')));
-  show6MonthSummary(data);
+    for (const c of e.coding) {
+      totalCodingMin += (c.timeSpent || 0);
+      codingCategories.set(c.category, (codingCategories.get(c.category) || 0) + 1);
+    }
 
-  console.log(color.dim('\n' + '─'.repeat(termWidth) + '\n'));
+    if (e.goodHabits.wokeUpEarly !== undefined) {
+      wokeLoggedDays++;
+      if (e.goodHabits.wokeUpEarly) wokeEarlyDays++;
+    }
+    if (e.goodHabits.didSport) sportDays++;
+    sportMinutes += e.goodHabits.sportMinutes || 0;
+
+    if (e.badHabits.watchedPorn !== undefined) {
+      pornLoggedDays++;
+      if (e.badHabits.watchedPorn) pornDays++;
+    }
+    entertainmentHoursTotal += e.badHabits.entertainmentHours || 0;
+    if (e.badHabits.entertainmentOveruse) overuseDays++;
+  }
+
+  const top = (map: Map<string, number>, limit = 5): string => {
+    const items = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, limit);
+    if (items.length === 0) return color.dim('Not enough data yet');
+    return items.map(([k, v]) => `${k} (${v})`).join(', ');
+  };
+
+  const learningHours = Math.floor(totalLearningMin / 60);
+  const learningRestMin = totalLearningMin % 60;
+  const codingHours = Math.floor(totalCodingMin / 60);
+  const codingRestMin = totalCodingMin % 60;
+
+  const header = figlet.textSync('OVERVIEW', { font: 'Small' });
+  console.log(boxen(color.bold(color.cyan(header)), {
+    padding: { top: 0, bottom: 0, left: 2, right: 2 },
+    margin: { top: 1, bottom: 0 },
+    borderStyle: 'bold',
+    borderColor: 'cyan',
+    textAlignment: 'center',
+    float: 'center'
+  }));
+
+  const executive =
+    `${color.bold('📋 Executive Summary')}\n` +
+    `Period: ${periodLabel}\n` +
+    `Tracked days: ${entries.length}\n` +
+    `Active days: ${activeDays}\n` +
+    `Successful days (>=3/4): ${successDays}\n` +
+    `Current streak: ${data.stats.currentStreak} | Highest streak: ${data.stats.highestStreak}`;
+  console.log(boxen(executive, {
+    title: 'Company Dashboard',
+    titleAlignment: 'center',
+    padding: { top: 1, bottom: 1, left: 3, right: 3 },
+    margin: { top: 1, bottom: 0 },
+    borderStyle: 'double',
+    borderColor: 'blue',
+    textAlignment: 'left',
+    float: 'center'
+  }));
+
+  const coreHabits =
+    `${color.bold('🎯 Core Habits')}\n` +
+    `🧩 Problems solved: ${totalProblems}\n` +
+    `📚 Reading sessions: ${totalReading}\n` +
+    `🎓 Learning time: ${learningHours}h ${learningRestMin}m\n` +
+    `💻 Coding time: ${codingHours}h ${codingRestMin}m\n\n` +
+    `${color.bold('Top Topics & Areas')}\n` +
+    `Problem topics: ${top(problemTopics)}\n` +
+    `Reading categories: ${top(readingCategories)}\n` +
+    `Coding categories: ${top(codingCategories)}`;
+  console.log(boxen(coreHabits, {
+    title: 'Performance Section',
+    titleAlignment: 'center',
+    padding: { top: 1, bottom: 1, left: 3, right: 3 },
+    margin: { top: 1, bottom: 0 },
+    borderStyle: 'round',
+    borderColor: 'green',
+    float: 'center'
+  }));
+
+  const goodRate = wokeLoggedDays > 0 ? Math.round((wokeEarlyDays / wokeLoggedDays) * 100) : 0;
+  const goodHabits =
+    `${color.bold('🌅 Good Habits')}\n` +
+    `Wake-up tracked days: ${wokeLoggedDays}\n` +
+    `Woke up early: ${wokeEarlyDays} day(s) (${goodRate}%)\n` +
+    `Sport days: ${sportDays}\n` +
+    `Total sport time: ${sportMinutes} min`;
+  console.log(boxen(goodHabits, {
+    title: 'Wellness Section',
+    titleAlignment: 'center',
+    padding: { top: 1, bottom: 1, left: 3, right: 3 },
+    margin: { top: 1, bottom: 0 },
+    borderStyle: 'round',
+    borderColor: 'cyan',
+    float: 'center'
+  }));
+
+  const pornRate = pornLoggedDays > 0 ? Math.round((pornDays / pornLoggedDays) * 100) : 0;
+  const avgEntertainment = entries.length > 0 ? (entertainmentHoursTotal / entries.length) : 0;
+  const badHabits =
+    `${color.bold('🚫 Bad Habits Reflection')}\n` +
+    `Porn check-ins: ${pornLoggedDays}\n` +
+    `Porn positive days: ${pornDays} (${pornRate}%)\n` +
+    `Entertainment total: ${entertainmentHoursTotal.toFixed(1)}h\n` +
+    `Entertainment average/day: ${avgEntertainment.toFixed(2)}h\n` +
+    `Overuse days (>4h): ${overuseDays}`;
+  console.log(boxen(badHabits, {
+    title: 'Risk Section',
+    titleAlignment: 'center',
+    padding: { top: 1, bottom: 1, left: 3, right: 3 },
+    margin: { top: 1, bottom: 1 },
+    borderStyle: 'round',
+    borderColor: 'red',
+    float: 'center'
+  }));
 }

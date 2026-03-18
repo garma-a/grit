@@ -14,39 +14,56 @@ export interface V1DailyEntry {
 }
 
 export interface ProblemSolvingLog {
-  difficulty: string; // 'easy', 'medium', 'hard'
+  difficulty: string;
   count: number;
-  topics: string[]; // e.g., ['Arrays', 'Binary Search']
+  topics: string[];
 }
 
 export interface ReadingLog {
   type: 'article' | 'docs' | 'book';
-  category: string; // e.g., 'Backend', 'Testing'
-  topic: string; // e.g., 'GraphQL', 'Jest'
+  category: string;
+  topic: string;
   pages?: number;
-  sections?: number; // for docs: number of sections read
+  sections?: number;
 }
 
 export interface LearningLog {
   category: string;
   topic: string;
-  duration?: number; // duration in minutes
+  duration?: number;
 }
 
 export interface CodingLog {
   category: string;
   topic: string;
-  timeSpent: number; // minutes
+  timeSpent: number;
+}
+
+export interface GoodHabitsLog {
+  wokeUpEarly?: boolean;
+  wakeUpTime?: string;
+  didSport?: boolean;
+  sportMinutes?: number;
+}
+
+export interface BadHabitsLog {
+  watchedPorn?: boolean;
+  pornReason?: string;
+  entertainmentHours?: number;
+  entertainmentOveruse?: boolean;
+  entertainmentReason?: string;
 }
 
 export interface DailyEntry {
-  date: string; // YYYY-MM-DD
+  date: string;
   problemSolving: ProblemSolvingLog[];
   reading: ReadingLog[];
   learning: LearningLog[];
   coding: CodingLog[];
-  score: number; // dynamically computed
-  success: boolean; // dynamically computed (score >= 3)
+  goodHabits: GoodHabitsLog;
+  badHabits: BadHabitsLog;
+  score: number;
+  success: boolean;
 }
 
 export interface Categories {
@@ -93,6 +110,8 @@ export function migrateV1ToV2(v1Data: any): GritData {
       reading: [],
       learning: [],
       coding: [],
+      goodHabits: {},
+      badHabits: {},
       score: old.score || 0,
       success: old.success || false
     };
@@ -160,6 +179,12 @@ export async function loadData(dataPath: string): Promise<GritData> {
           p.topics = [p.topic];
           delete p.topic;
         }
+      }
+      if (!entry.goodHabits || typeof entry.goodHabits !== 'object') {
+        entry.goodHabits = {};
+      }
+      if (!entry.badHabits || typeof entry.badHabits !== 'object') {
+        entry.badHabits = {};
       }
     }
     return parsed as GritData;
@@ -271,10 +296,18 @@ export function getOrCreateTodayEntry(data: GritData): DailyEntry {
       reading: [],
       learning: [],
       coding: [],
+      goodHabits: {},
+      badHabits: {},
       score: 0,
       success: false
     };
     data.history.push(entry);
+  }
+  if (!entry.goodHabits || typeof entry.goodHabits !== 'object') {
+    entry.goodHabits = {};
+  }
+  if (!entry.badHabits || typeof entry.badHabits !== 'object') {
+    entry.badHabits = {};
   }
   return entry;
 }
