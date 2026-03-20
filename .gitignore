@@ -3,6 +3,7 @@ node_modules
 
 ./.gritdata.json
 
+.gritdata.db
 # output
 out
 dist
