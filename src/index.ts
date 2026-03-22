@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { Command } from 'commander';
 import { getConfig, promptForConfig, saveConfig, hasLegacyJsonFile, getLegacyJsonPath } from './config.js';
 import { loadData, getTodayDateString, updateStats, saveData, getDbPath, closeDatabase, jsonPathToDbPath } from './storage.js';
-import { runDashboard, showHistory, showStatistics } from './ui.js';
+import { runQuickCheckIn, showHistory, showStatistics } from './ui.js';
 import color from 'picocolors';
 import * as p from '@clack/prompts';
 import { join, dirname, resolve } from 'node:path';
@@ -49,21 +49,8 @@ program
   .description('A fantastic CLI habit tracker with SQLite storage')
   .version(pkg.version)
   .addHelpText('after', `
-Keyboard Shortcuts for Dashboard:
-  p - Log Problem Solving
-  r - Log Reading
-  l - Log Learning
-  c - Log Coding
-  g - Good Habits Check-In
-  b - Bad Habits Reflection
-  s - View Detailed Overview
-  t - Clear Today's Habits
-  a - Clear All History
-  h - Show Keyboard Shortcuts
-  e - Exit Dashboard
-
-CLI Commands:
-  grit              Open the interactive dashboard
+Usage:
+  grit              Daily check-in (asks all habit questions in order)
   grit status       Day-by-day activity history (last 30 days)
   grit status -a    Show all history
   grit graphs       Detailed overview (last 30 days)
@@ -73,9 +60,10 @@ CLI Commands:
   grit config       Change data storage path
   grit clear        Clear history
 
-Storage:
-  Data is stored in SQLite database (~/.gritdata.db by default)
-  Legacy JSON files are automatically migrated on first run
+Tips:
+  - During check-in, answer "No" to skip any activity you didn't do today
+  - Press Ctrl+C to cancel the current question
+  - Data is stored in SQLite database (~/.gritdata.db by default)
 `);
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -481,8 +469,8 @@ program
       }
     }
 
-    // ── Run the dashboard ──
-    await runDashboard(data, config.dataPath);
+    // ── Run the quick check-in flow ──
+    await runQuickCheckIn(data, config.dataPath);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════════

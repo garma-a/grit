@@ -151,78 +151,59 @@ async function promptTopic(message: string, pastTopics: string[]): Promise<strin
   return selection as string;
 }
 
-export async function runDashboard(data: GritData, dataPath: string): Promise<void> {
-  let theme = getTheme(data.stats.currentStreak);
+// ═══════════════════════════════════════════════════════════════════════════════
+// QUICK CHECK-IN FLOW - Sequential habit questionnaire
+// ═══════════════════════════════════════════════════════════════════════════════
 
-  const renderBanner = () => {
-    console.clear();
-    let streakText = "";
-    if (data.stats.currentStreak > 0) {
-      streakText = `Current Streak: ${theme.fg(data.stats.currentStreak.toString())} ${theme.emoji} | Highest: ${data.stats.highestStreak} ${theme.emoji}`;
-    } else {
-      streakText = `Welcome! Let's build a new streak today. ${theme.emoji}`;
-    }
+export async function runQuickCheckIn(data: GritData, dataPath: string): Promise<void> {
+  const theme = getTheme(data.stats.currentStreak);
 
-    // Create large ASCII Art
-    const asciiArt = figlet.textSync('GRIT', { font: 'Slant' });
-    const styledArt = color.bold(theme.fg(asciiArt));
+  // Display banner
+  console.clear();
+  let streakText = "";
+  if (data.stats.currentStreak > 0) {
+    streakText = `Current Streak: ${theme.fg(data.stats.currentStreak.toString())} ${theme.emoji} | Highest: ${data.stats.highestStreak} ${theme.emoji}`;
+  } else {
+    streakText = `Welcome! Let's build a new streak today. ${theme.emoji}`;
+  }
 
-    console.log(
-      boxen(`${styledArt}\n\n${color.bold('GRIT COMMAND CENTER')}\n${color.dim('Focused daily execution')}\n\n${streakText}`, {
-        padding: { top: 1, bottom: 1, left: 4, right: 4 },
-        margin: { bottom: 1, top: 1 },
-        borderStyle: 'bold',
-        borderColor: theme.borderColor as any,
-        textAlignment: 'center',
-        float: 'center'
-      })
-    );
-    p.intro(color.dim("Let's begin logging..."));
-  };
+  const asciiArt = figlet.textSync('GRIT', { font: 'Slant' });
+  const styledArt = color.bold(theme.fg(asciiArt));
 
-  renderBanner();
+  console.log(
+    boxen(`${styledArt}\n\n${color.bold('DAILY CHECK-IN')}\n${color.dim('Answer each question or press Ctrl+C to skip')}\n\n${streakText}`, {
+      padding: { top: 1, bottom: 1, left: 4, right: 4 },
+      margin: { bottom: 1, top: 1 },
+      borderStyle: 'bold',
+      borderColor: theme.borderColor as any,
+      textAlignment: 'center',
+      float: 'center'
+    })
+  );
 
+  p.intro(color.dim("Let's log your daily activities. Press Ctrl+C to skip any section.\n"));
 
-  while (true) {
-    const entry = getOrCreateTodayEntry(data);
+  const entry = getOrCreateTodayEntry(data);
+  let hasChanges = false;
 
-    // Auto-compute score visually for dashboard
-    let currentScore = 0;
-    if (entry.problemSolving.length > 0) currentScore++;
-    if (entry.reading.length > 0) currentScore++;
-    if (entry.learning.length > 0) currentScore++;
-    if (entry.coding.length > 0) currentScore++;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1. Problem Solving
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.blue('\n━━━ 🧩 Problem Solving ━━━')));
+  
+  const didProblems = await p.confirm({
+    message: 'Did you solve any problems today?',
+    initialValue: false
+  });
 
-    const dashboardChoice = await p.selectKey({
-      message: centerLine(`What would you like to do? (Today's Score: ${currentScore}/4)`, process.stdout.columns || 100),
-      options: [
-        { value: 'p', label: centerLine(`[p] 🧩 Problem Solving (${entry.problemSolving.length} logged)`) },
-        { value: 'r', label: centerLine(`[r] 📚 Reading (${entry.reading.length} logged)`) },
-        { value: 'l', label: centerLine(`[l] 🎓 Learning (${entry.learning.length} logged)`) },
-        { value: 'c', label: centerLine(`[c] 💻 Coding (${entry.coding.length} logged)`) },
-        { value: 'g', label: centerLine('[g] 🌅 Good Habits Check-In') },
-        { value: 'b', label: centerLine('[b] 🚫 Bad Habits Reflection') },
-        { value: 's', label: centerLine('[s] 📋 Detailed Overview') },
-        { value: 't', label: centerLine("[t] 🗑️ Clear Today's Habits") },
-        { value: 'a', label: centerLine('[a] ⚠️ Clear All History') },
-        { value: 'h', label: centerLine('[h] ⌨️ Keyboard Shortcuts') },
-        { value: 'e', label: centerLine('[e] 🚪 Exit') }
-      ]
+  if (!p.isCancel(didProblems) && didProblems) {
+    const count = await p.text({
+      message: 'How many problems did you solve?',
+      placeholder: 'e.g., 2',
+      initialValue: '1',
     });
 
-    if (p.isCancel(dashboardChoice) || dashboardChoice === 'e') {
-      p.outro('Keep up the grit! See you next time! ✌️');
-      process.exit(0);
-    }
-
-    if (dashboardChoice === 'p') {
-      const count = await p.text({
-        message: 'How many problems did you solve?',
-        placeholder: 'e.g., 2',
-        initialValue: '1',
-      });
-      if (p.isCancel(count)) continue;
-
+    if (!p.isCancel(count)) {
       const difficulty = await p.select({
         message: 'What was the difficulty?',
         options: [
@@ -231,135 +212,198 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
           { value: 'Hard', label: 'Hard' }
         ]
       });
-      if (p.isCancel(difficulty)) continue;
 
-      const topics = await promptMultiCategory('What topics were these problems about?', data.categories.problems);
-      if (!topics || topics.length === 0) continue;
-
-      topics.forEach(t => ensureCategory(data.categories.problems, t));
-
-      entry.problemSolving.push({
-        difficulty: difficulty as string,
-        count: parseInt(count as string) || 1,
-        topics
-      });
-    }
-
-    else if (dashboardChoice === 'r') {
-      const type = await p.select({
-        message: 'What kind of reading?',
-        options: [
-          { value: 'article', label: 'Article' },
-          { value: 'docs', label: 'Documentation' },
-          { value: 'book', label: 'Book' }
-        ]
-      });
-      if (p.isCancel(type)) continue;
-
-      const category = await promptCategory('What was the main category? (e.g. Backend, Testing)', data.categories.reading);
-      if (!category) continue;
-      const newCategory = ensureCategory(data.categories.reading, category);
-
-      const pastTopics = extractPastTopics(data, 'reading', newCategory);
-      const topic = await promptTopic('Specific topic/title of the read?', pastTopics);
-      if (!topic) continue;
-
-      let pages;
-      let sections;
-      if (type === 'book') {
-        const pg = await p.text({ 
-          message: 'How many pages did you read? (e.g. 5, 20)',
-          validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
-        });
-        if (!p.isCancel(pg) && typeof pg === 'string' && pg) pages = parseInt(pg) || undefined;
-      } else if (type === 'docs') {
-        const sec = await p.text({ 
-          message: 'How many sections did you read?', 
-          placeholder: 'e.g., 2',
-          validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
-        });
-        if (!p.isCancel(sec) && typeof sec === 'string' && sec) sections = parseInt(sec) || undefined;
-      }
-
-      entry.reading.push({
-        type: type as 'article' | 'docs' | 'book',
-        category: newCategory,
-        topic: (topic as string).trim(),
-        pages,
-        sections
-      });
-    }
-
-    else if (dashboardChoice === 'l') {
-      const category = await promptCategory('What category is the tutorial/course on?', data.categories.learning);
-      if (!category) continue;
-      const newCategory = ensureCategory(data.categories.learning, category);
-
-      const pastTopics = extractPastTopics(data, 'learning', newCategory);
-      const topic = await promptTopic('What exactly did you learn?', pastTopics);
-      if (!topic) continue;
-
-      const dur = await p.text({
-        message: 'How many minutes was the video/course? (e.g. 30, 60)',
-        validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 45)'
-      });
-      const duration = (p.isCancel(dur) || typeof dur !== 'string' || !dur) ? undefined : parseInt(dur);
-
-      entry.learning.push({
-        category: newCategory,
-        topic: (topic as string).trim(),
-        duration
-      });
-    }
-
-    else if (dashboardChoice === 'c') {
-      const category = await promptCategory('What area did you practice building?', data.categories.coding);
-      if (!category) continue;
-      const newCategory = ensureCategory(data.categories.coding, category);
-
-      const pastTopics = extractPastTopics(data, 'coding', newCategory);
-      const topic = await promptTopic('What did you build?', pastTopics);
-      if (!topic) continue;
-
-      const timeSpentInput = await p.text({ 
-        message: 'How many minutes did you spend coding? (e.g. 30, 45, 90)',
-        validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 60)'
-      });
-      if (p.isCancel(timeSpentInput) || typeof timeSpentInput !== 'string' || !timeSpentInput) continue;
-      const timeSpent = parseInt(timeSpentInput) || 0;
-
-      entry.coding.push({
-        category: newCategory,
-        topic: (topic as string).trim(),
-        timeSpent
-      });
-    }
-
-    else if (dashboardChoice === 'g') {
-      const woke = await p.confirm({
-        message: 'Did you wake up early today?',
-        initialValue: false
-      });
-      if (p.isCancel(woke)) continue;
-
-      entry.goodHabits.wokeUpEarly = woke as boolean;
-
-      if (woke) {
-        const wakeTime = await p.text({
-          message: 'At what time did you wake up? (HH:MM)',
-          placeholder: '06:30',
-          validate: (val) => /^([01]?\d|2[0-3]):[0-5]\d$/.test((val || '').trim()) ? undefined : 'Use HH:MM format (e.g. 06:30)'
-        });
-        if (!p.isCancel(wakeTime)) {
-          entry.goodHabits.wakeUpTime = (wakeTime as string).trim();
+      if (!p.isCancel(difficulty)) {
+        const topics = await promptMultiCategory('What topics were these problems about?', data.categories.problems);
+        
+        if (topics && topics.length > 0) {
+          topics.forEach(t => ensureCategory(data.categories.problems, t));
+          entry.problemSolving.push({
+            difficulty: difficulty as string,
+            count: parseInt(count as string) || 1,
+            topics
+          });
+          hasChanges = true;
+          p.log.success(color.green('Problem solving logged!'));
         }
       }
+    }
+  } else if (!p.isCancel(didProblems)) {
+    p.log.info(color.dim('Skipped problem solving.'));
+  }
 
-      const didSport = await p.confirm({
-        message: 'Did you do sport today?',
-        initialValue: false
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2. Reading
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.yellow('\n━━━ 📚 Reading ━━━')));
+
+  const didReading = await p.confirm({
+    message: 'Did you read anything today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(didReading) && didReading) {
+    const type = await p.select({
+      message: 'What kind of reading?',
+      options: [
+        { value: 'article', label: 'Article' },
+        { value: 'docs', label: 'Documentation' },
+        { value: 'book', label: 'Book' }
+      ]
+    });
+
+    if (!p.isCancel(type)) {
+      const category = await promptCategory('What was the main category? (e.g. Backend, Testing)', data.categories.reading);
+      
+      if (category) {
+        const newCategory = ensureCategory(data.categories.reading, category);
+        const pastTopics = extractPastTopics(data, 'reading', newCategory);
+        const topic = await promptTopic('Specific topic/title of the read?', pastTopics);
+
+        if (topic) {
+          let pages;
+          let sections;
+          
+          if (type === 'book') {
+            const pg = await p.text({ 
+              message: 'How many pages did you read? (e.g. 5, 20)',
+              validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
+            });
+            if (!p.isCancel(pg) && typeof pg === 'string' && pg) pages = parseInt(pg) || undefined;
+          } else if (type === 'docs') {
+            const sec = await p.text({ 
+              message: 'How many sections did you read?', 
+              placeholder: 'e.g., 2',
+              validate: (val) => val === '' ? undefined : (/^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (digits only)')
+            });
+            if (!p.isCancel(sec) && typeof sec === 'string' && sec) sections = parseInt(sec) || undefined;
+          }
+
+          entry.reading.push({
+            type: type as 'article' | 'docs' | 'book',
+            category: newCategory,
+            topic: (topic as string).trim(),
+            pages,
+            sections
+          });
+          hasChanges = true;
+          p.log.success(color.green('Reading logged!'));
+        }
+      }
+    }
+  } else if (!p.isCancel(didReading)) {
+    p.log.info(color.dim('Skipped reading.'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 3. Learning
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.magenta('\n━━━ 🎓 Learning ━━━')));
+
+  const didLearning = await p.confirm({
+    message: 'Did you watch any tutorials/courses today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(didLearning) && didLearning) {
+    const category = await promptCategory('What category is the tutorial/course on?', data.categories.learning);
+    
+    if (category) {
+      const newCategory = ensureCategory(data.categories.learning, category);
+      const pastTopics = extractPastTopics(data, 'learning', newCategory);
+      const topic = await promptTopic('What exactly did you learn?', pastTopics);
+
+      if (topic) {
+        const dur = await p.text({
+          message: 'How many minutes was the video/course? (e.g. 30, 60)',
+          validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 45)'
+        });
+        const duration = (p.isCancel(dur) || typeof dur !== 'string' || !dur) ? undefined : parseInt(dur);
+
+        entry.learning.push({
+          category: newCategory,
+          topic: (topic as string).trim(),
+          duration
+        });
+        hasChanges = true;
+        p.log.success(color.green('Learning logged!'));
+      }
+    }
+  } else if (!p.isCancel(didLearning)) {
+    p.log.info(color.dim('Skipped learning.'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 4. Coding
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.green('\n━━━ 💻 Coding ━━━')));
+
+  const didCoding = await p.confirm({
+    message: 'Did you code/build anything today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(didCoding) && didCoding) {
+    const category = await promptCategory('What area did you practice building?', data.categories.coding);
+    
+    if (category) {
+      const newCategory = ensureCategory(data.categories.coding, category);
+      const pastTopics = extractPastTopics(data, 'coding', newCategory);
+      const topic = await promptTopic('What did you build?', pastTopics);
+
+      if (topic) {
+        const timeSpentInput = await p.text({ 
+          message: 'How many minutes did you spend coding? (e.g. 30, 45, 90)',
+          validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 60)'
+        });
+        
+        if (!p.isCancel(timeSpentInput) && typeof timeSpentInput === 'string' && timeSpentInput) {
+          const timeSpent = parseInt(timeSpentInput) || 0;
+          entry.coding.push({
+            category: newCategory,
+            topic: (topic as string).trim(),
+            timeSpent
+          });
+          hasChanges = true;
+          p.log.success(color.green('Coding logged!'));
+        }
+      }
+    }
+  } else if (!p.isCancel(didCoding)) {
+    p.log.info(color.dim('Skipped coding.'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 5. Good Habits
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.cyan('\n━━━ 🌅 Good Habits ━━━')));
+
+  const woke = await p.confirm({
+    message: 'Did you wake up early today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(woke)) {
+    entry.goodHabits.wokeUpEarly = woke as boolean;
+    hasChanges = true;
+
+    if (woke) {
+      const wakeTime = await p.text({
+        message: 'At what time did you wake up? (HH:MM)',
+        placeholder: '06:30',
+        validate: (val) => /^([01]?\d|2[0-3]):[0-5]\d$/.test((val || '').trim()) ? undefined : 'Use HH:MM format (e.g. 06:30)'
       });
-      if (p.isCancel(didSport)) continue;
+      if (!p.isCancel(wakeTime)) {
+        entry.goodHabits.wakeUpTime = (wakeTime as string).trim();
+      }
+    }
+
+    const didSport = await p.confirm({
+      message: 'Did you do sport today?',
+      initialValue: false
+    });
+    
+    if (!p.isCancel(didSport)) {
       entry.goodHabits.didSport = didSport as boolean;
 
       if (didSport) {
@@ -372,35 +416,45 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
           entry.goodHabits.sportMinutes = parseInt(sportMinutes as string, 10) || 0;
         }
       }
+      p.log.success(color.green('Good habits logged!'));
+    }
+  } else {
+    p.log.info(color.dim('Skipped good habits.'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 6. Bad Habits
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.red('\n━━━ 🚫 Bad Habits Reflection ━━━')));
+
+  const watchedPorn = await p.confirm({
+    message: 'Did you watch porn today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(watchedPorn)) {
+    entry.badHabits.watchedPorn = watchedPorn as boolean;
+    hasChanges = true;
+
+    if (watchedPorn) {
+      const pornReason = await p.text({
+        message: 'Why did it happen today?',
+        placeholder: 'Stress / boredom / habit loop...'
+      });
+      if (!p.isCancel(pornReason) && typeof pornReason === 'string') {
+        entry.badHabits.pornReason = pornReason.trim();
+      }
+    } else {
+      entry.badHabits.pornReason = undefined;
     }
 
-    else if (dashboardChoice === 'b') {
-      const watchedPorn = await p.confirm({
-        message: 'Did you watch porn today?',
-        initialValue: false
-      });
-      if (p.isCancel(watchedPorn)) continue;
-      entry.badHabits.watchedPorn = watchedPorn as boolean;
+    const entertainmentHoursInput = await p.text({
+      message: 'How many hours did you spend on movies/anime/games today?',
+      placeholder: '2',
+      validate: (val) => /^\d+(\.\d+)?$/.test((val || '').trim()) ? undefined : 'Enter a number (e.g. 2 or 4.5)'
+    });
 
-      if (watchedPorn) {
-        const pornReason = await p.text({
-          message: 'Why did it happen today?',
-          placeholder: 'Stress / boredom / habit loop...'
-        });
-        if (!p.isCancel(pornReason) && typeof pornReason === 'string') {
-          entry.badHabits.pornReason = pornReason.trim();
-        }
-      } else {
-        entry.badHabits.pornReason = undefined;
-      }
-
-      const entertainmentHoursInput = await p.text({
-        message: 'How many hours did you spend on movies/anime/games today?',
-        placeholder: '2',
-        validate: (val) => /^\d+(\.\d+)?$/.test((val || '').trim()) ? undefined : 'Enter a number (e.g. 2 or 4.5)'
-      });
-      if (p.isCancel(entertainmentHoursInput)) continue;
-
+    if (!p.isCancel(entertainmentHoursInput)) {
       const entertainmentHours = parseFloat(entertainmentHoursInput as string) || 0;
       entry.badHabits.entertainmentHours = entertainmentHours;
       entry.badHabits.entertainmentOveruse = entertainmentHours > 4;
@@ -416,99 +470,55 @@ export async function runDashboard(data: GritData, dataPath: string): Promise<vo
       } else {
         entry.badHabits.entertainmentReason = undefined;
       }
+      p.log.success(color.green('Bad habits logged!'));
     }
+  } else {
+    p.log.info(color.dim('Skipped bad habits.'));
+  }
 
-    else if (dashboardChoice === 's') {
-      const period = await p.select({
-        message: 'Select time period for the detailed overview:',
-        options: [
-          { value: '30', label: 'Last 30 days' },
-          { value: '365', label: 'Last year' },
-          { value: 'all', label: 'All time' }
-        ]
-      });
-      if (p.isCancel(period)) { renderBanner(); continue; }
-      showStatistics(data, period as string);
-      await p.text({ message: 'Press Enter to return to Dashboard...' });
-      renderBanner();
-      continue;
-    }
-
-    else if (dashboardChoice === 'h') {
-      console.log(boxen(color.cyan(`
-Keyboard Shortcuts:
-  [p] Log Problem Solving
-  [r] Log Reading
-  [l] Log Learning
-  [c] Log Coding
-  [g] Log Good Habits Check-In
-  [b] Log Bad Habits Reflection
-  [s] View Detailed Overview
-  [t] Clear Today's Habits
-  [a] Clear All History
-  [h] Show Keyboard Shortcuts
-  [e] Exit Dashboard
-       `.trim()), { title: '⌨️ Shortcuts Help', padding: 1, borderColor: 'cyan' }));
-      await p.text({ message: 'Press Enter to return to Dashboard...' });
-      renderBanner();
-      continue;
-    }
-
-    else if (dashboardChoice === 't') {
-      const confirm = await p.confirm({
-        message: 'Are you sure you want to clear all habits logged today? This lets you reload them.',
-        initialValue: false
-      });
-      if (!p.isCancel(confirm) && confirm) {
-        entry.problemSolving = [];
-        entry.reading = [];
-        entry.learning = [];
-        entry.coding = [];
-        entry.goodHabits = {};
-        entry.badHabits = {};
-        entry.score = 0;
-        entry.success = false;
-
-        updateStats(data);
-        await saveData(dataPath, data);
-
-        theme = getTheme(data.stats.currentStreak);
-        renderBanner();
-        p.note(color.yellow("Today's habits have been cleared! You can start logging them again."));
-      } else {
-        renderBanner();
-      }
-      continue;
-    }
-
-    else if (dashboardChoice === 'a') {
-      const confirm = await p.confirm({
-        message: color.red('Are you sure you want to clear ALL history? This cannot be undone!'),
-        initialValue: false
-      });
-      if (!p.isCancel(confirm) && confirm) {
-        data.history = [];
-        data.stats = { currentStreak: 0, highestStreak: 0 };
-        await saveData(dataPath, data);
-
-        theme = getTheme(data.stats.currentStreak);
-        renderBanner();
-        p.note(color.red('All history has been completely cleared.'));
-      } else {
-        renderBanner();
-      }
-      continue;
-    }
-
-    // Refresh streak and score after each valid input, and persist so we don't lose data
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Save and show summary
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (hasChanges) {
     computeDailySuccessAndScore(entry);
     updateStats(data);
     await saveData(dataPath, data);
-
-    theme = getTheme(data.stats.currentStreak);
-    renderBanner();
-    p.note(color.green('✔ Done! Activity logged successfully.'));
   }
+
+  // Show daily summary
+  console.log('\n');
+  
+  let currentScore = 0;
+  if (entry.problemSolving.length > 0) currentScore++;
+  if (entry.reading.length > 0) currentScore++;
+  if (entry.learning.length > 0) currentScore++;
+  if (entry.coding.length > 0) currentScore++;
+
+  const scoreColor = currentScore >= 3 ? color.green : currentScore >= 2 ? color.yellow : color.red;
+  const statusEmoji = currentScore >= 3 ? '✅' : '❌';
+
+  let summaryText = `${color.bold("Today's Summary")}\n\n`;
+  summaryText += `🧩 Problems: ${entry.problemSolving.length > 0 ? color.green(`${entry.problemSolving.reduce((sum, ps) => sum + ps.count, 0)} solved`) : color.dim('None')}\n`;
+  summaryText += `📚 Reading: ${entry.reading.length > 0 ? color.green(`${entry.reading.length} session(s)`) : color.dim('None')}\n`;
+  summaryText += `🎓 Learning: ${entry.learning.length > 0 ? color.green(`${entry.learning.length} session(s)`) : color.dim('None')}\n`;
+  summaryText += `💻 Coding: ${entry.coding.length > 0 ? color.green(`${entry.coding.length} session(s)`) : color.dim('None')}\n\n`;
+  summaryText += `${statusEmoji} Score: ${scoreColor(`${currentScore}/4`)} ${currentScore >= 3 ? '— Great job!' : '— Keep pushing!'}\n`;
+  summaryText += `${theme.emoji} Streak: ${theme.fg(data.stats.currentStreak.toString())} days`;
+
+  console.log(
+    boxen(summaryText, {
+      title: '📊 Daily Check-In Complete',
+      titleAlignment: 'center',
+      padding: { top: 1, bottom: 1, left: 3, right: 3 },
+      margin: { top: 1, bottom: 1 },
+      borderStyle: 'round',
+      borderColor: currentScore >= 3 ? 'green' : 'yellow',
+      textAlignment: 'left',
+      float: 'center'
+    })
+  );
+
+  p.outro(color.dim('Use grit --help to see other commands (status, graphs, clear, etc.)'));
 }
 
 export function showStatsOverview(data: GritData): void {
