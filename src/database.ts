@@ -99,7 +99,11 @@ function initializeSchema(database: SqliteDatabase): void {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       current_streak INTEGER NOT NULL DEFAULT 0,
       highest_streak INTEGER NOT NULL DEFAULT 0,
-      schema_version INTEGER NOT NULL DEFAULT 2,
+      current_points INTEGER NOT NULL DEFAULT 0,
+      total_points_earned INTEGER NOT NULL DEFAULT 0,
+      monthly_subtraction_amount INTEGER NOT NULL DEFAULT 100,
+      next_subtraction_date TEXT,
+      schema_version INTEGER NOT NULL DEFAULT 3,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -112,9 +116,28 @@ function initializeSchema(database: SqliteDatabase): void {
 
   if (statsCheck.count === 0) {
     database.exec(`
-      INSERT INTO stats (id, current_streak, highest_streak, schema_version)
-      VALUES (1, 0, 0, 2);
+      INSERT INTO stats (id, current_streak, highest_streak, current_points, total_points_earned, monthly_subtraction_amount, schema_version)
+      VALUES (1, 0, 0, 0, 0, 100, 3);
     `);
+  } else {
+    // ── Migrate existing stats to add points columns ──
+    const columns = database.prepare("PRAGMA table_info(stats)").all() as Array<{ name: string }>;
+    const columnNames = columns.map(c => c.name);
+    
+    if (!columnNames.includes('current_points')) {
+      database.exec(`ALTER TABLE stats ADD COLUMN current_points INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!columnNames.includes('total_points_earned')) {
+      database.exec(`ALTER TABLE stats ADD COLUMN total_points_earned INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!columnNames.includes('monthly_subtraction_amount')) {
+      database.exec(`ALTER TABLE stats ADD COLUMN monthly_subtraction_amount INTEGER NOT NULL DEFAULT 100`);
+    }
+    if (!columnNames.includes('next_subtraction_date')) {
+      database.exec(`ALTER TABLE stats ADD COLUMN next_subtraction_date TEXT`);
+    }
+    // Update schema version
+    database.exec(`UPDATE stats SET schema_version = 3 WHERE id = 1`);
   }
 
   // ── Categories table ──
@@ -264,11 +287,46 @@ function initializeSchema(database: SqliteDatabase): void {
     CREATE INDEX IF NOT EXISTS idx_bad_habits_entry ON bad_habits(entry_id);
   `);
 
+  // ── English learning logs table ──
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS english_learning_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('video', 'book_grammar', 'book_vocabulary', 'speaking_ai')),
+      duration_minutes INTEGER CHECK (duration_minutes IS NULL OR duration_minutes >= 0),
+      words_count INTEGER CHECK (words_count IS NULL OR words_count >= 0),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (entry_id) REFERENCES daily_entries(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_english_learning_entry ON english_learning_logs(entry_id);
+  `);
+
+  // ── Points history table ──
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS points_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entry_id INTEGER,
+      points_change INTEGER NOT NULL,
+      points_after INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (entry_id) REFERENCES daily_entries(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_points_history_created ON points_history(created_at);
+  `);
+
+  // ── Daily entries: add points column ──
+  const entryColumns = database.prepare("PRAGMA table_info(daily_entries)").all() as Array<{ name: string }>;
+  const entryColumnNames = entryColumns.map(c => c.name);
+  if (!entryColumnNames.includes('points_earned')) {
+    database.exec(`ALTER TABLE daily_entries ADD COLUMN points_earned INTEGER NOT NULL DEFAULT 0`);
+  }
+
   // ── Verify all tables exist ──
   const requiredTables = [
     'stats', 'categories', 'daily_entries', 'problem_solving_logs',
     'problem_topics', 'reading_logs', 'learning_logs', 'coding_logs',
-    'good_habits', 'bad_habits'
+    'good_habits', 'bad_habits', 'english_learning_logs', 'points_history'
   ];
 
   for (const table of requiredTables) {
@@ -326,16 +384,33 @@ export interface BadHabitsLog {
   entertainmentReason?: string;
 }
 
+export interface EnglishLearningLog {
+  type: 'video' | 'book_grammar' | 'book_vocabulary' | 'speaking_ai';
+  durationMinutes?: number;  // for video and speaking_ai
+  wordsCount?: number;        // for book_vocabulary
+}
+
+export interface PointsHistoryEntry {
+  id?: number;
+  entryId?: number;
+  pointsChange: number;
+  pointsAfter: number;
+  reason: string;
+  createdAt: string;
+}
+
 export interface DailyEntry {
   date: string;
   problemSolving: ProblemSolvingLog[];
   reading: ReadingLog[];
   learning: LearningLog[];
   coding: CodingLog[];
+  englishLearning: EnglishLearningLog[];
   goodHabits: GoodHabitsLog;
   badHabits: BadHabitsLog;
   score: number;
   success: boolean;
+  pointsEarned: number;
 }
 
 export interface Categories {
@@ -350,9 +425,14 @@ export interface GritData {
   stats: {
     currentStreak: number;
     highestStreak: number;
+    currentPoints: number;
+    totalPointsEarned: number;
+    monthlySubtractionAmount: number;
+    nextSubtractionDate?: string;
   };
   categories: Categories;
   history: DailyEntry[];
+  pointsHistory: PointsHistoryEntry[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -372,15 +452,25 @@ export function loadDataFromDb(dbPath: string): GritData {
   assert(database !== null, '[LOAD] Failed to get database connection');
 
   // ── Load stats ──
-  const statsRow = database.prepare('SELECT current_streak, highest_streak, schema_version FROM stats WHERE id = 1').get() as {
+  const statsRow = database.prepare(`
+    SELECT current_streak, highest_streak, current_points, total_points_earned, 
+           monthly_subtraction_amount, next_subtraction_date, schema_version 
+    FROM stats WHERE id = 1
+  `).get() as {
     current_streak: number;
     highest_streak: number;
+    current_points: number;
+    total_points_earned: number;
+    monthly_subtraction_amount: number;
+    next_subtraction_date: string | null;
     schema_version: number;
   } | undefined;
 
   assert(statsRow !== undefined, '[LOAD] Stats row must exist in database');
   assert(typeof statsRow.current_streak === 'number', '[LOAD] current_streak must be a number');
   assert(typeof statsRow.highest_streak === 'number', '[LOAD] highest_streak must be a number');
+  assert(typeof statsRow.current_points === 'number', '[LOAD] current_points must be a number');
+  assert(typeof statsRow.total_points_earned === 'number', '[LOAD] total_points_earned must be a number');
   assert(statsRow.current_streak >= 0, '[LOAD] current_streak cannot be negative');
   assert(statsRow.highest_streak >= 0, '[LOAD] highest_streak cannot be negative');
 
@@ -607,6 +697,39 @@ export function loadDataFromDb(dbPath: string): GritData {
       }
     }
 
+    // ── Load English learning logs ──
+    const englishLogs = database.prepare(`
+      SELECT type, duration_minutes, words_count FROM english_learning_logs WHERE entry_id = ?
+    `).all(entryId) as Array<{
+      type: string;
+      duration_minutes: number | null;
+      words_count: number | null;
+    }>;
+
+    assert(Array.isArray(englishLogs), '[LOAD] english_learning_logs query must return an array');
+
+    const englishLearning: EnglishLearningLog[] = englishLogs.map(e => {
+      assert(typeof e.type === 'string', '[LOAD] english type must be a string');
+      assert(['video', 'book_grammar', 'book_vocabulary', 'speaking_ai'].includes(e.type), `[LOAD] english type must be video/book_grammar/book_vocabulary/speaking_ai, got: ${e.type}`);
+
+      const log: EnglishLearningLog = {
+        type: e.type as 'video' | 'book_grammar' | 'book_vocabulary' | 'speaking_ai'
+      };
+      if (e.duration_minutes !== null) {
+        assert(typeof e.duration_minutes === 'number', '[LOAD] duration_minutes must be a number or null');
+        log.durationMinutes = e.duration_minutes;
+      }
+      if (e.words_count !== null) {
+        assert(typeof e.words_count === 'number', '[LOAD] words_count must be a number or null');
+        log.wordsCount = e.words_count;
+      }
+      return log;
+    });
+
+    // ── Get points earned (from daily_entries table) ──
+    const pointsEarnedRow = database.prepare('SELECT points_earned FROM daily_entries WHERE id = ?').get(entryId) as { points_earned: number } | undefined;
+    const pointsEarned = pointsEarnedRow?.points_earned ?? 0;
+
     // ── Build daily entry ──
     const entry: DailyEntry = {
       date: entryRow.date,
@@ -614,10 +737,12 @@ export function loadDataFromDb(dbPath: string): GritData {
       reading,
       learning,
       coding,
+      englishLearning,
       goodHabits,
       badHabits,
       score: entryRow.score,
-      success: entryRow.success === 1
+      success: entryRow.success === 1,
+      pointsEarned
     };
 
     // ── ASSERTION: validate constructed entry ──
@@ -626,21 +751,51 @@ export function loadDataFromDb(dbPath: string): GritData {
     assert(Array.isArray(entry.reading), '[LOAD] constructed entry reading must be an array');
     assert(Array.isArray(entry.learning), '[LOAD] constructed entry learning must be an array');
     assert(Array.isArray(entry.coding), '[LOAD] constructed entry coding must be an array');
+    assert(Array.isArray(entry.englishLearning), '[LOAD] constructed entry englishLearning must be an array');
     assert(typeof entry.goodHabits === 'object', '[LOAD] constructed entry goodHabits must be an object');
     assert(typeof entry.badHabits === 'object', '[LOAD] constructed entry badHabits must be an object');
 
     history.push(entry);
   }
 
+  // ── Load points history ──
+  const pointsHistoryRows = database.prepare(`
+    SELECT id, entry_id, points_change, points_after, reason, created_at 
+    FROM points_history ORDER BY created_at ASC
+  `).all() as Array<{
+    id: number;
+    entry_id: number | null;
+    points_change: number;
+    points_after: number;
+    reason: string;
+    created_at: string;
+  }>;
+
+  assert(Array.isArray(pointsHistoryRows), '[LOAD] points_history query must return an array');
+
+  const pointsHistory: PointsHistoryEntry[] = pointsHistoryRows.map(p => ({
+    id: p.id,
+    entryId: p.entry_id ?? undefined,
+    pointsChange: p.points_change,
+    pointsAfter: p.points_after,
+    reason: p.reason,
+    createdAt: p.created_at
+  }));
+
   // ── Build final GritData ──
   const data: GritData = {
     version: statsRow.schema_version,
     stats: {
       currentStreak: statsRow.current_streak,
-      highestStreak: statsRow.highest_streak
+      highestStreak: statsRow.highest_streak,
+      currentPoints: statsRow.current_points,
+      totalPointsEarned: statsRow.total_points_earned,
+      monthlySubtractionAmount: statsRow.monthly_subtraction_amount,
+      nextSubtractionDate: statsRow.next_subtraction_date ?? undefined
     },
     categories,
-    history
+    history,
+    pointsHistory
   };
 
   // ── ASSERTION: validate final data structure ──
@@ -675,6 +830,9 @@ export function saveDataToDb(dbPath: string, data: GritData): void {
   // ── Update stats ──
   assert(typeof data.stats.currentStreak === 'number', '[SAVE] currentStreak must be a number');
   assert(typeof data.stats.highestStreak === 'number', '[SAVE] highestStreak must be a number');
+  assert(typeof data.stats.currentPoints === 'number', '[SAVE] currentPoints must be a number');
+  assert(typeof data.stats.totalPointsEarned === 'number', '[SAVE] totalPointsEarned must be a number');
+  assert(typeof data.stats.monthlySubtractionAmount === 'number', '[SAVE] monthlySubtractionAmount must be a number');
   assert(data.stats.currentStreak >= 0, '[SAVE] currentStreak cannot be negative');
   assert(data.stats.highestStreak >= 0, '[SAVE] highestStreak cannot be negative');
 
@@ -682,10 +840,22 @@ export function saveDataToDb(dbPath: string, data: GritData): void {
     UPDATE stats SET 
       current_streak = ?,
       highest_streak = ?,
+      current_points = ?,
+      total_points_earned = ?,
+      monthly_subtraction_amount = ?,
+      next_subtraction_date = ?,
       schema_version = ?,
       updated_at = datetime('now')
     WHERE id = 1
-  `).run(data.stats.currentStreak, data.stats.highestStreak, data.version);
+  `).run(
+    data.stats.currentStreak, 
+    data.stats.highestStreak, 
+    data.stats.currentPoints,
+    data.stats.totalPointsEarned,
+    data.stats.monthlySubtractionAmount,
+    data.stats.nextSubtractionDate ?? null,
+    data.version
+  );
 
   // ── Sync categories ──
   for (const [catType, names] of Object.entries(data.categories)) {
@@ -712,16 +882,19 @@ export function saveDataToDb(dbPath: string, data: GritData): void {
     assert(Array.isArray(entry.reading), '[SAVE] entry.reading must be an array');
     assert(Array.isArray(entry.learning), '[SAVE] entry.learning must be an array');
     assert(Array.isArray(entry.coding), '[SAVE] entry.coding must be an array');
+    assert(Array.isArray(entry.englishLearning), '[SAVE] entry.englishLearning must be an array');
+    assert(typeof entry.pointsEarned === 'number', '[SAVE] entry.pointsEarned must be a number');
 
     // ── Upsert daily entry ──
     database.prepare(`
-      INSERT INTO daily_entries (date, score, success, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
+      INSERT INTO daily_entries (date, score, success, points_earned, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
       ON CONFLICT(date) DO UPDATE SET
         score = excluded.score,
         success = excluded.success,
+        points_earned = excluded.points_earned,
         updated_at = datetime('now')
-    `).run(entry.date, entry.score, entry.success ? 1 : 0);
+    `).run(entry.date, entry.score, entry.success ? 1 : 0, entry.pointsEarned);
 
     // ── Get entry ID ──
     const entryIdRow = database.prepare('SELECT id FROM daily_entries WHERE date = ?').get(entry.date) as { id: number } | undefined;
@@ -735,6 +908,7 @@ export function saveDataToDb(dbPath: string, data: GritData): void {
     database.prepare('DELETE FROM reading_logs WHERE entry_id = ?').run(entryId);
     database.prepare('DELETE FROM learning_logs WHERE entry_id = ?').run(entryId);
     database.prepare('DELETE FROM coding_logs WHERE entry_id = ?').run(entryId);
+    database.prepare('DELETE FROM english_learning_logs WHERE entry_id = ?').run(entryId);
     database.prepare('DELETE FROM good_habits WHERE entry_id = ?').run(entryId);
     database.prepare('DELETE FROM bad_habits WHERE entry_id = ?').run(entryId);
 
@@ -826,6 +1000,17 @@ export function saveDataToDb(dbPath: string, data: GritData): void {
       bh.entertainmentOveruse === undefined ? null : (bh.entertainmentOveruse ? 1 : 0),
       bh.entertainmentReason ?? null
     );
+
+    // ── Insert English learning logs ──
+    for (const eLog of entry.englishLearning) {
+      assert(typeof eLog.type === 'string', '[SAVE] english learning type must be a string');
+      assert(['video', 'book_grammar', 'book_vocabulary', 'speaking_ai'].includes(eLog.type), `[SAVE] english learning type must be video/book_grammar/book_vocabulary/speaking_ai, got: ${eLog.type}`);
+
+      database.prepare(`
+        INSERT INTO english_learning_logs (entry_id, type, duration_minutes, words_count)
+        VALUES (?, ?, ?, ?)
+      `).run(entryId, eLog.type, eLog.durationMinutes ?? null, eLog.wordsCount ?? null);
+    }
   }
 }
 
@@ -980,10 +1165,14 @@ export function migrateFromJson(jsonData: GritData, dbPath: string): void {
 
   // ── Normalize data with defaults ──
   const normalizedData: GritData = {
-    version: jsonData.version || 2,
+    version: jsonData.version || 3,
     stats: {
       currentStreak: jsonData.stats?.currentStreak || 0,
-      highestStreak: jsonData.stats?.highestStreak || 0
+      highestStreak: jsonData.stats?.highestStreak || 0,
+      currentPoints: jsonData.stats?.currentPoints || 0,
+      totalPointsEarned: jsonData.stats?.totalPointsEarned || 0,
+      monthlySubtractionAmount: jsonData.stats?.monthlySubtractionAmount || 100,
+      nextSubtractionDate: jsonData.stats?.nextSubtractionDate
     },
     categories: {
       reading: jsonData.categories?.reading || ['Backend', 'Testing', 'Database', 'Security', 'Frontend'],
@@ -991,7 +1180,8 @@ export function migrateFromJson(jsonData: GritData, dbPath: string): void {
       coding: jsonData.categories?.coding || ['API', 'UI', 'Scripting'],
       problems: jsonData.categories?.problems || ['Easy', 'Medium', 'Hard']
     },
-    history: jsonData.history || []
+    history: jsonData.history || [],
+    pointsHistory: jsonData.pointsHistory || []
   };
 
   // ── Validate normalized history entries ──
@@ -1005,10 +1195,12 @@ export function migrateFromJson(jsonData: GritData, dbPath: string): void {
     if (!Array.isArray(entry.reading)) entry.reading = [];
     if (!Array.isArray(entry.learning)) entry.learning = [];
     if (!Array.isArray(entry.coding)) entry.coding = [];
+    if (!Array.isArray(entry.englishLearning)) entry.englishLearning = [];
     if (typeof entry.goodHabits !== 'object' || entry.goodHabits === null) entry.goodHabits = {};
     if (typeof entry.badHabits !== 'object' || entry.badHabits === null) entry.badHabits = {};
     if (typeof entry.score !== 'number') entry.score = 0;
     if (typeof entry.success !== 'boolean') entry.success = false;
+    if (typeof entry.pointsEarned !== 'number') entry.pointsEarned = 0;
   }
 
   // ── Save to database ──

@@ -4,6 +4,7 @@ import boxen from 'boxen';
 import figlet from 'figlet';
 import type { DailyEntry, GritData } from './storage.js';
 import { getTodayDateString, computeDailySuccessAndScore, updateStats, saveData, getOrCreateTodayEntry, ensureCategory, getNextOrPrevDay } from './storage.js';
+import { calculateTier, getTierBadge, updateEntryPoints, checkAndApplyMonthlySubtraction } from './points.js';
 
 function getTheme(streak: number) {
   if (streak >= 8) {
@@ -156,7 +157,12 @@ async function promptTopic(message: string, pastTopics: string[]): Promise<strin
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export async function runQuickCheckIn(data: GritData, dataPath: string): Promise<void> {
+  // Check and apply monthly subtraction if due
+  checkAndApplyMonthlySubtraction(data);
+  
   const theme = getTheme(data.stats.currentStreak);
+  const tierInfo = calculateTier(data.stats.currentPoints, data.stats.monthlySubtractionAmount);
+  const tierBadge = getTierBadge(tierInfo);
 
   // Display banner
   console.clear();
@@ -166,12 +172,14 @@ export async function runQuickCheckIn(data: GritData, dataPath: string): Promise
   } else {
     streakText = `Welcome! Let's build a new streak today. ${theme.emoji}`;
   }
+  
+  const pointsText = `Points: ${color.bold(data.stats.currentPoints.toString())} | Tier: ${tierBadge}`;
 
   const asciiArt = figlet.textSync('GRIT', { font: 'Slant' });
   const styledArt = color.bold(theme.fg(asciiArt));
 
   console.log(
-    boxen(`${styledArt}\n\n${color.bold('DAILY CHECK-IN')}\n${color.dim('Answer each question or press Ctrl+C to skip')}\n\n${streakText}`, {
+    boxen(`${styledArt}\n\n${color.bold('DAILY CHECK-IN')}\n${color.dim('Answer each question or press Ctrl+C to skip')}\n\n${streakText}\n${pointsText}`, {
       padding: { top: 1, bottom: 1, left: 4, right: 4 },
       margin: { bottom: 1, top: 1 },
       borderStyle: 'bold',
@@ -477,10 +485,78 @@ export async function runQuickCheckIn(data: GritData, dataPath: string): Promise
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // 7. English Learning
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(color.bold(color.blue('\n━━━ 🇬🇧 English Learning ━━━')));
+
+  const didEnglish = await p.confirm({
+    message: 'Did you practice English today?',
+    initialValue: false
+  });
+
+  if (!p.isCancel(didEnglish) && didEnglish) {
+    const englishType = await p.select({
+      message: 'What type of practice?',
+      options: [
+        { value: 'video', label: 'Video in English' },
+        { value: 'book_grammar', label: 'Book - Grammar revision' },
+        { value: 'book_vocabulary', label: 'Book - New vocabulary' },
+        { value: 'speaking_ai', label: 'Speaking with AI' }
+      ]
+    });
+
+    if (!p.isCancel(englishType)) {
+      const logEntry: any = { type: englishType };
+
+      if (englishType === 'video') {
+        const durationInput = await p.text({
+          message: 'How many minutes did you watch? (e.g. 30, 60, 120)',
+          validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 60)'
+        });
+        if (!p.isCancel(durationInput) && typeof durationInput === 'string' && durationInput) {
+          logEntry.durationMinutes = parseInt(durationInput) || 0;
+          entry.englishLearning.push(logEntry);
+          hasChanges = true;
+          p.log.success(color.green('English video session logged!'));
+        }
+      } else if (englishType === 'book_grammar') {
+        entry.englishLearning.push(logEntry);
+        hasChanges = true;
+        p.log.success(color.green('Grammar revision session logged!'));
+      } else if (englishType === 'book_vocabulary') {
+        const wordsInput = await p.text({
+          message: 'How many new words did you learn? (e.g. 5, 10, 20)',
+          validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number (e.g. 10)'
+        });
+        if (!p.isCancel(wordsInput) && typeof wordsInput === 'string' && wordsInput) {
+          logEntry.wordsCount = parseInt(wordsInput) || 0;
+          entry.englishLearning.push(logEntry);
+          hasChanges = true;
+          p.log.success(color.green('Vocabulary session logged!'));
+        }
+      } else if (englishType === 'speaking_ai') {
+        const speakingDurationInput = await p.text({
+          message: 'How many minutes did you speak? (e.g. 10, 20, 30)',
+          validate: (val) => /^\d+$/.test(val || '') ? undefined : 'Please enter a valid number in minutes (e.g. 10)'
+        });
+        if (!p.isCancel(speakingDurationInput) && typeof speakingDurationInput === 'string' && speakingDurationInput) {
+          logEntry.durationMinutes = parseInt(speakingDurationInput) || 0;
+          entry.englishLearning.push(logEntry);
+          hasChanges = true;
+          p.log.success(color.green('Speaking practice logged!'));
+        }
+      }
+    }
+  } else if (!p.isCancel(didEnglish)) {
+    p.log.info(color.dim('Skipped English learning.'));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Save and show summary
   // ─────────────────────────────────────────────────────────────────────────────
   if (hasChanges) {
     computeDailySuccessAndScore(entry);
+    updateEntryPoints(entry, data);  // Calculate and update points
     updateStats(data);
     await saveData(dataPath, data);
   }
@@ -496,14 +572,20 @@ export async function runQuickCheckIn(data: GritData, dataPath: string): Promise
 
   const scoreColor = currentScore >= 3 ? color.green : currentScore >= 2 ? color.yellow : color.red;
   const statusEmoji = currentScore >= 3 ? '✅' : '❌';
+  
+  const updatedTierInfo = calculateTier(data.stats.currentPoints, data.stats.monthlySubtractionAmount);
+  const updatedTierBadge = getTierBadge(updatedTierInfo);
 
   let summaryText = `${color.bold("Today's Summary")}\n\n`;
   summaryText += `🧩 Problems: ${entry.problemSolving.length > 0 ? color.green(`${entry.problemSolving.reduce((sum, ps) => sum + ps.count, 0)} solved`) : color.dim('None')}\n`;
   summaryText += `📚 Reading: ${entry.reading.length > 0 ? color.green(`${entry.reading.length} session(s)`) : color.dim('None')}\n`;
   summaryText += `🎓 Learning: ${entry.learning.length > 0 ? color.green(`${entry.learning.length} session(s)`) : color.dim('None')}\n`;
-  summaryText += `💻 Coding: ${entry.coding.length > 0 ? color.green(`${entry.coding.length} session(s)`) : color.dim('None')}\n\n`;
+  summaryText += `💻 Coding: ${entry.coding.length > 0 ? color.green(`${entry.coding.length} session(s)`) : color.dim('None')}\n`;
+  summaryText += `🇬🇧 English: ${entry.englishLearning.length > 0 ? color.green(`${entry.englishLearning.length} session(s)`) : color.dim('None')}\n\n`;
   summaryText += `${statusEmoji} Score: ${scoreColor(`${currentScore}/4`)} ${currentScore >= 3 ? '— Great job!' : '— Keep pushing!'}\n`;
-  summaryText += `${theme.emoji} Streak: ${theme.fg(data.stats.currentStreak.toString())} days`;
+  summaryText += `${theme.emoji} Streak: ${theme.fg(data.stats.currentStreak.toString())} days\n`;
+  summaryText += `💎 Points Earned: ${color.bold(color.yellow(`+${entry.pointsEarned}`))} | Total: ${color.bold(data.stats.currentPoints.toString())}\n`;
+  summaryText += `🏆 Tier: ${updatedTierBadge}`;
 
   console.log(
     boxen(summaryText, {

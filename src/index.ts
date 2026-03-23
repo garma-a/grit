@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import { getConfig, promptForConfig, saveConfig, hasLegacyJsonFile, getLegacyJsonPath } from './config.js';
 import { loadData, getTodayDateString, updateStats, saveData, getDbPath, closeDatabase, jsonPathToDbPath } from './storage.js';
 import { runQuickCheckIn, showHistory, showStatistics } from './ui.js';
+import { runQuickLog } from './quick-log.js';
 import color from 'picocolors';
 import * as p from '@clack/prompts';
 import { join, dirname, resolve } from 'node:path';
@@ -49,21 +50,30 @@ program
   .description('A fantastic CLI habit tracker with SQLite storage')
   .version(pkg.version)
   .addHelpText('after', `
-Usage:
-  grit              Daily check-in (asks all habit questions in order)
-  grit status       Day-by-day activity history (last 30 days)
-  grit status -a    Show all history
-  grit graphs       Detailed overview (last 30 days)
-  grit graphs -y    Last year graphs
-  grit graphs -a    All time detailed overview
-  grit import       Import existing .gritdata.json from another device
-  grit config       Change data storage path
-  grit clear        Clear history
+${color.bold('Quick Start:')}
+  ${color.bold(color.green('grit'))}                  Quick-log activities in real-time (default)
+  ${color.bold(color.cyan('grit checkin'))}           Full check-in with good/bad habits reflection
 
-Tips:
-  - During check-in, answer "No" to skip any activity you didn't do today
-  - Press Ctrl+C to cancel the current question
-  - Data is stored in SQLite database (~/.gritdata.db by default)
+${color.bold('Commands:')}
+  grit                    Quick-log interface (log activities anytime)
+  grit checkin            Full daily check-in questionnaire
+  grit status             Day-by-day activity history (last 30 days)
+  grit status -a          Show all history
+  grit graphs             Detailed overview (last 30 days)
+  grit graphs -y          Last year graphs
+  grit graphs -a          All time detailed overview
+  grit points             View points history and tier status
+  grit points:reset       Reset points to 0 (keeps history)
+  grit points:set-date    Schedule monthly points subtraction
+  grit import             Import existing .gritdata.json from another device
+  grit config             Change data storage path
+  grit clear              Clear history
+
+${color.bold('Tips:')}
+  • Use ${color.green('grit')} throughout the day to log activities as you complete them
+  • Use ${color.cyan('grit checkin')} at end of day for good/bad habits reflection
+  • Press ${color.bold('p/r/l/c/e')} for quick activity logging (Problem/Read/Learn/Code/English)
+  • Earn points for activities and climb the tier ladder! 💎
 `);
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -248,6 +258,34 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// QUICK LOG COMMAND (Real-time logging throughout the day)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+program
+  .command('log')
+  .alias('quick')
+  .description('Quick log activities throughout the day (real-time logging)')
+  .action(async () => {
+    const config = await getConfig();
+    
+    if (!config) {
+      const newConfig = await promptForConfig();
+      assert(newConfig !== null, '[LOG_CMD] Config must exist after prompt');
+    }
+    
+    const finalConfig = await getConfig();
+    assert(finalConfig !== null, '[LOG_CMD] Config should exist now');
+    assert(typeof finalConfig.dataPath === 'string', '[LOG_CMD] config.dataPath must be a string');
+    
+    const data = await loadData(finalConfig.dataPath);
+    
+    assert(typeof data === 'object' && data !== null, '[LOG_CMD] Loaded data must be a non-null object');
+    assert(Array.isArray(data.history), '[LOG_CMD] data.history must be an array');
+    
+    await runQuickLog(data, finalConfig.dataPath);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // STATUS COMMAND
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -345,7 +383,14 @@ program
       
       if (!p.isCancel(confirm) && confirm) {
         data.history = [];
-        data.stats = { currentStreak: 0, highestStreak: 0 };
+        data.stats = { 
+          currentStreak: 0, 
+          highestStreak: 0,
+          currentPoints: 0,
+          totalPointsEarned: 0,
+          monthlySubtractionAmount: 100
+        };
+        data.pointsHistory = [];
         await saveData(config.dataPath, data);
         
         // ── ASSERTION: data was cleared ──
@@ -377,10 +422,12 @@ program
           entry.reading = [];
           entry.learning = [];
           entry.coding = [];
+          entry.englishLearning = [];
           entry.goodHabits = {};
           entry.badHabits = {};
           entry.score = 0;
           entry.success = false;
+          entry.pointsEarned = 0;
 
           updateStats(data);
           await saveData(config.dataPath, data);
@@ -405,7 +452,220 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// DEFAULT ACTION (DASHBOARD)
+// POINTS COMMANDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+program
+  .command('points')
+  .description('View points history with tier visualization')
+  .option('-l, --limit <number>', 'Limit number of entries to show', '20')
+  .action(async (options) => {
+    const config = await getConfig();
+    
+    if (!config) {
+      console.log(color.red('No configuration found. Run grit first to set it up.'));
+      process.exit(1);
+    }
+    
+    assert(typeof config.dataPath === 'string', '[POINTS_CMD] config.dataPath must be a string');
+    
+    const data = await loadData(config.dataPath);
+    
+    assert(typeof data === 'object' && data !== null, '[POINTS_CMD] Loaded data must be a non-null object');
+    assert(Array.isArray(data.pointsHistory), '[POINTS_CMD] data.pointsHistory must be an array');
+
+    // Import points functions
+    const { calculateTier, getTierBadge, TIER_DEFINITIONS } = await import('./points.js');
+    
+    const currentTier = calculateTier(data.stats.currentPoints, data.stats.monthlySubtractionAmount);
+    const tierBadge = getTierBadge(currentTier);
+    
+    console.clear();
+    p.intro(color.bgMagenta(color.white(' 💎 Points History ')));
+    
+    console.log(`\n${color.bold('Current Status:')}`);
+    console.log(`  Points: ${color.bold(color.yellow(data.stats.currentPoints.toString()))}`);
+    console.log(`  Total Earned: ${color.bold(color.green(data.stats.totalPointsEarned.toString()))}`);
+    console.log(`  Tier: ${tierBadge}`);
+    console.log(`  Monthly Subtraction: ${color.bold(data.stats.monthlySubtractionAmount.toString())} points`);
+    
+    if (data.stats.nextSubtractionDate) {
+      console.log(`  Next Subtraction: ${color.cyan(data.stats.nextSubtractionDate)}`);
+    } else {
+      console.log(`  Next Subtraction: ${color.dim('Not scheduled (use grit points set-date)')}`);
+    }
+    
+    console.log(`\n${color.bold('Tier Thresholds:')}`);
+    console.log(`  ${TIER_DEFINITIONS.failure.color}💀 Failure${'\x1b[0m'}: < ${data.stats.monthlySubtractionAmount}`);
+    console.log(`  ${TIER_DEFINITIONS.bronze.color}🥉 Bronze${'\x1b[0m'}: ${data.stats.monthlySubtractionAmount} - ${Math.floor(data.stats.monthlySubtractionAmount * 1.5) - 1}`);
+    console.log(`  ${TIER_DEFINITIONS.silver.color}🥈 Silver${'\x1b[0m'}: ${Math.floor(data.stats.monthlySubtractionAmount * 1.5)} - ${data.stats.monthlySubtractionAmount * 2 - 1}`);
+    console.log(`  ${TIER_DEFINITIONS.gold.color}🥇 Gold${'\x1b[0m'}: ${data.stats.monthlySubtractionAmount * 2} - ${data.stats.monthlySubtractionAmount * 3 - 1}`);
+    console.log(`  ${TIER_DEFINITIONS.diamond.color}💎 Diamond${'\x1b[0m'}: ${data.stats.monthlySubtractionAmount * 3}+`);
+    
+    if (data.pointsHistory.length === 0) {
+      console.log(`\n${color.dim('No points history yet. Start logging activities to earn points!')}`);
+    } else {
+      const limit = parseInt(options.limit) || 20;
+      const recentHistory = data.pointsHistory.slice(-limit).reverse();
+      
+      console.log(`\n${color.bold('Recent History:')} (showing last ${limit} entries)\n`);
+      
+      for (const entry of recentHistory) {
+        const tierInfo = calculateTier(entry.pointsAfter, data.stats.monthlySubtractionAmount);
+        const changeColor = entry.pointsChange >= 0 ? color.green : color.red;
+        const changePrefix = entry.pointsChange >= 0 ? '+' : '';
+        
+        console.log(`  ${color.dim(entry.createdAt)} | ${changeColor(changePrefix + entry.pointsChange)} pts | Total: ${color.bold(entry.pointsAfter.toString())} | ${getTierBadge(tierInfo)}`);
+        console.log(`    ${color.dim(entry.reason)}`);
+      }
+    }
+    
+    p.outro(color.dim('Use grit points reset to reset points, or grit points set-date to schedule monthly subtraction'));
+  });
+
+program
+  .command('points:reset')
+  .description('Reset points to 0 (keeps history)')
+  .action(async () => {
+    const config = await getConfig();
+    
+    if (!config) {
+      console.log(color.red('No configuration found. Run grit first to set it up.'));
+      process.exit(1);
+    }
+    
+    assert(typeof config.dataPath === 'string', '[POINTS_RESET_CMD] config.dataPath must be a string');
+    
+    const data = await loadData(config.dataPath);
+    
+    assert(typeof data === 'object' && data !== null, '[POINTS_RESET_CMD] Loaded data must be a non-null object');
+    
+    const confirm = await p.confirm({
+      message: color.red(`Are you sure you want to reset your ${data.stats.currentPoints} points to 0?`),
+      initialValue: false
+    });
+    
+    if (!p.isCancel(confirm) && confirm) {
+      const { resetPoints } = await import('./points.js');
+      resetPoints(data);
+      await saveData(config.dataPath, data);
+      
+      assert(data.stats.currentPoints === 0, '[POINTS_RESET_CMD] Points should be 0 after reset');
+      
+      p.outro(color.green('Points have been reset to 0. Your history is preserved.'));
+    } else {
+      p.outro('Operation cancelled.');
+    }
+  });
+
+program
+  .command('points:set-date')
+  .description('Set the next monthly subtraction date')
+  .option('--now', 'Start monthly subtraction from today')
+  .option('--tomorrow', 'Start monthly subtraction from tomorrow')
+  .action(async (options) => {
+    const config = await getConfig();
+    
+    if (!config) {
+      console.log(color.red('No configuration found. Run grit first to set it up.'));
+      process.exit(1);
+    }
+    
+    assert(typeof config.dataPath === 'string', '[POINTS_DATE_CMD] config.dataPath must be a string');
+    
+    const data = await loadData(config.dataPath);
+    
+    assert(typeof data === 'object' && data !== null, '[POINTS_DATE_CMD] Loaded data must be a non-null object');
+    
+    const { setMonthlySubtractionDate } = await import('./points.js');
+    
+    if (options.now || options.tomorrow) {
+      const startNow = options.now === true;
+      setMonthlySubtractionDate(data, startNow);
+      await saveData(config.dataPath, data);
+      
+      const dateMsg = startNow ? 'today' : 'tomorrow';
+      p.outro(color.green(`Monthly subtraction scheduled to start from ${dateMsg}. Next date: ${data.stats.nextSubtractionDate}`));
+    } else {
+      console.log(color.yellow('Please specify when to start:'));
+      console.log('  grit points:set-date --now       (Start monthly subtraction from today)');
+      console.log('  grit points:set-date --tomorrow  (Start monthly subtraction from tomorrow)');
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FULL CHECK-IN COMMAND (Comprehensive questionnaire with good/bad habits)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+program
+  .command('checkin')
+  .description('Full daily check-in with all questions (including good/bad habits)')
+  .action(async () => {
+    let config = await getConfig();
+    
+    if (!config) {
+      config = await promptForConfig();
+    }
+    
+    // ── ASSERTION: config must exist now ──
+    assert(config !== null, '[CHECKIN_CMD] Config must exist after prompt');
+    assert(typeof config.dataPath === 'string', '[CHECKIN_CMD] config.dataPath must be a string');
+    
+    // ── Check for legacy JSON migration message ──
+    if (hasLegacyJsonFile(config)) {
+      const legacyPath = getLegacyJsonPath(config);
+      if (legacyPath) {
+        p.note(
+          `Migrating data from ${color.cyan(legacyPath)} to SQLite database.\n` +
+          `Your original JSON file will be preserved as a backup.`
+        );
+      }
+    }
+
+    const data = await loadData(config.dataPath);
+    
+    // ── ASSERTION: loaded data validation ──
+    assert(typeof data === 'object' && data !== null, '[CHECKIN_CMD] Loaded data must be a non-null object');
+    assert(typeof data.version === 'number', '[CHECKIN_CMD] data.version must be a number');
+    assert(Array.isArray(data.history), '[CHECKIN_CMD] data.history must be an array');
+    assert(typeof data.stats === 'object', '[CHECKIN_CMD] data.stats must be an object');
+    assert(typeof data.categories === 'object', '[CHECKIN_CMD] data.categories must be an object');
+    
+    const todayStr = getTodayDateString();
+    
+    // ── ASSERTION: date format ──
+    assert(/^\d{4}-\d{2}-\d{2}$/.test(todayStr), `[CHECKIN_CMD] todayStr must be YYYY-MM-DD, got: ${todayStr}`);
+
+    const existingEntryIndex = data.history.findIndex(e => e.date === todayStr);
+    
+    // ── ASSERTION: index is valid ──
+    assert(typeof existingEntryIndex === 'number', '[CHECKIN_CMD] existingEntryIndex must be a number');
+    assert(existingEntryIndex >= -1, '[CHECKIN_CMD] existingEntryIndex cannot be less than -1');
+
+    if (existingEntryIndex !== -1) {
+      const existingEntry = data.history[existingEntryIndex];
+      
+      // ── ASSERTION: existing entry validation ──
+      assert(existingEntry !== undefined, '[CHECKIN_CMD] existingEntry should exist at found index');
+      assert(existingEntry.date === todayStr, '[CHECKIN_CMD] existingEntry date should match today');
+      
+      const wantToOverride = await p.confirm({
+        message: 'You have already checked in today! Do you want to continue editing today\'s entry?',
+        initialValue: true
+      });
+
+      if (p.isCancel(wantToOverride) || !wantToOverride) {
+        p.outro('See you tomorrow! ✌️');
+        process.exit(0);
+      }
+    }
+
+    // ── Run the full check-in flow ──
+    await runQuickCheckIn(data, config.dataPath);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DEFAULT ACTION (QUICK LOG - Real-time logging)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 program
@@ -439,38 +699,9 @@ program
     assert(Array.isArray(data.history), '[DEFAULT_CMD] data.history must be an array');
     assert(typeof data.stats === 'object', '[DEFAULT_CMD] data.stats must be an object');
     assert(typeof data.categories === 'object', '[DEFAULT_CMD] data.categories must be an object');
-    
-    const todayStr = getTodayDateString();
-    
-    // ── ASSERTION: date format ──
-    assert(/^\d{4}-\d{2}-\d{2}$/.test(todayStr), `[DEFAULT_CMD] todayStr must be YYYY-MM-DD, got: ${todayStr}`);
 
-    const existingEntryIndex = data.history.findIndex(e => e.date === todayStr);
-    
-    // ── ASSERTION: index is valid ──
-    assert(typeof existingEntryIndex === 'number', '[DEFAULT_CMD] existingEntryIndex must be a number');
-    assert(existingEntryIndex >= -1, '[DEFAULT_CMD] existingEntryIndex cannot be less than -1');
-
-    if (existingEntryIndex !== -1) {
-      const existingEntry = data.history[existingEntryIndex];
-      
-      // ── ASSERTION: existing entry validation ──
-      assert(existingEntry !== undefined, '[DEFAULT_CMD] existingEntry should exist at found index');
-      assert(existingEntry.date === todayStr, '[DEFAULT_CMD] existingEntry date should match today');
-      
-      const wantToOverride = await p.confirm({
-        message: 'You have already checked in today! Do you want to continue editing today\'s entry?',
-        initialValue: true
-      });
-
-      if (p.isCancel(wantToOverride) || !wantToOverride) {
-        p.outro('See you tomorrow! ✌️');
-        process.exit(0);
-      }
-    }
-
-    // ── Run the quick check-in flow ──
-    await runQuickCheckIn(data, config.dataPath);
+    // ── Run the quick log interface ──
+    await runQuickLog(data, config.dataPath);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════════

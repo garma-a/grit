@@ -163,10 +163,12 @@ export function migrateV1ToV2(v1Data: any): GritData {
         reading: [],
         learning: [],
         coding: [],
+        englishLearning: [],
         goodHabits: {},
         badHabits: {},
         score: typeof old.score === 'number' ? old.score : 0,
-        success: typeof old.success === 'boolean' ? old.success : false
+        success: typeof old.success === 'boolean' ? old.success : false,
+        pointsEarned: 0
       };
 
       // ── Migrate problem solving ──
@@ -213,10 +215,13 @@ export function migrateV1ToV2(v1Data: any): GritData {
   }
 
   const result: GritData = {
-    version: 2,
+    version: 3,
     stats: {
       currentStreak: v1Data.stats?.currentStreak || 0,
-      highestStreak: v1Data.stats?.highestStreak || 0
+      highestStreak: v1Data.stats?.highestStreak || 0,
+      currentPoints: 0,
+      totalPointsEarned: 0,
+      monthlySubtractionAmount: 100
     },
     categories: {
       reading: ['Backend', 'Testing', 'Database', 'Security', 'Frontend'],
@@ -224,11 +229,12 @@ export function migrateV1ToV2(v1Data: any): GritData {
       coding: ['API', 'UI', 'Scripting'],
       problems: ['Easy', 'Medium', 'Hard']
     },
-    history: newHistory
+    history: newHistory,
+    pointsHistory: []
   };
 
   // ── ASSERTION: result validation ──
-  assert(result.version === 2, '[MIGRATE_V1] result version must be 2');
+  assert(result.version === 3, '[MIGRATE_V1] result version must be 3');
   assert(Array.isArray(result.history), '[MIGRATE_V1] result history must be an array');
   assert(typeof result.stats === 'object', '[MIGRATE_V1] result stats must be an object');
 
@@ -349,19 +355,26 @@ export async function loadData(dataPath: string): Promise<GritData> {
  */
 function createDefaultData(): GritData {
   const data: GritData = {
-    version: 2,
-    stats: { currentStreak: 0, highestStreak: 0 },
+    version: 3,
+    stats: { 
+      currentStreak: 0, 
+      highestStreak: 0,
+      currentPoints: 0,
+      totalPointsEarned: 0,
+      monthlySubtractionAmount: 100
+    },
     categories: {
       reading: ['Backend', 'Testing', 'Database', 'Security', 'Frontend'],
       learning: ['System Design', 'Algorithms', 'Languages'],
       coding: ['API', 'UI', 'Scripting'],
       problems: ['Easy', 'Medium', 'Hard']
     },
-    history: []
+    history: [],
+    pointsHistory: []
   };
 
   // ── ASSERTION: default data validation ──
-  assert(data.version === 2, '[DEFAULT] version must be 2');
+  assert(data.version === 3, '[DEFAULT] version must be 3');
   assert(data.stats.currentStreak === 0, '[DEFAULT] currentStreak must be 0');
   assert(data.stats.highestStreak === 0, '[DEFAULT] highestStreak must be 0');
   assert(data.categories.reading.length > 0, '[DEFAULT] reading categories must not be empty');
@@ -378,10 +391,14 @@ function normalizeV2Data(parsed: any): GritData {
   assert(typeof parsed === 'object' && parsed !== null, '[NORMALIZE] parsed must be a non-null object');
 
   const data: GritData = {
-    version: 2,
+    version: 3,
     stats: {
       currentStreak: parsed.stats?.currentStreak || 0,
-      highestStreak: parsed.stats?.highestStreak || 0
+      highestStreak: parsed.stats?.highestStreak || 0,
+      currentPoints: parsed.stats?.currentPoints || 0,
+      totalPointsEarned: parsed.stats?.totalPointsEarned || 0,
+      monthlySubtractionAmount: parsed.stats?.monthlySubtractionAmount || 100,
+      nextSubtractionDate: parsed.stats?.nextSubtractionDate
     },
     categories: {
       reading: Array.isArray(parsed.categories?.reading) ? parsed.categories.reading : ['Backend', 'Testing', 'Database', 'Security', 'Frontend'],
@@ -389,7 +406,8 @@ function normalizeV2Data(parsed: any): GritData {
       coding: Array.isArray(parsed.categories?.coding) ? parsed.categories.coding : ['API', 'UI', 'Scripting'],
       problems: Array.isArray(parsed.categories?.problems) ? parsed.categories.problems : ['Easy', 'Medium', 'Hard']
     },
-    history: []
+    history: [],
+    pointsHistory: Array.isArray(parsed.pointsHistory) ? parsed.pointsHistory : []
   };
 
   // ── Normalize history entries ──
@@ -431,10 +449,12 @@ function normalizeV2Data(parsed: any): GritData {
         reading: Array.isArray(entry.reading) ? entry.reading : [],
         learning: Array.isArray(entry.learning) ? entry.learning : [],
         coding: Array.isArray(entry.coding) ? entry.coding : [],
+        englishLearning: Array.isArray(entry.englishLearning) ? entry.englishLearning : [],
         goodHabits: typeof entry.goodHabits === 'object' && entry.goodHabits !== null ? entry.goodHabits : {},
         badHabits: typeof entry.badHabits === 'object' && entry.badHabits !== null ? entry.badHabits : {},
         score: typeof entry.score === 'number' ? entry.score : 0,
-        success: typeof entry.success === 'boolean' ? entry.success : false
+        success: typeof entry.success === 'boolean' ? entry.success : false,
+        pointsEarned: typeof entry.pointsEarned === 'number' ? entry.pointsEarned : 0
       };
 
       data.history.push(normalizedEntry);
@@ -442,7 +462,7 @@ function normalizeV2Data(parsed: any): GritData {
   }
 
   // ── ASSERTION: normalized data validation ──
-  assert(data.version === 2, '[NORMALIZE] version must be 2');
+  assert(data.version === 3, '[NORMALIZE] version must be 3');
   assert(Array.isArray(data.history), '[NORMALIZE] history must be an array');
 
   return data;
@@ -673,10 +693,12 @@ export function getOrCreateTodayEntry(data: GritData): DailyEntry {
       reading: [],
       learning: [],
       coding: [],
+      englishLearning: [],
       goodHabits: {},
       badHabits: {},
       score: 0,
-      success: false
+      success: false,
+      pointsEarned: 0
     };
     data.history.push(entry);
 
@@ -684,12 +706,18 @@ export function getOrCreateTodayEntry(data: GritData): DailyEntry {
     assert(data.history.includes(entry), '[GET_TODAY] Entry was not added to history');
   }
 
-  // ── Ensure goodHabits and badHabits are objects ──
+  // ── Ensure arrays and objects exist ──
   if (!entry.goodHabits || typeof entry.goodHabits !== 'object') {
     entry.goodHabits = {};
   }
   if (!entry.badHabits || typeof entry.badHabits !== 'object') {
     entry.badHabits = {};
+  }
+  if (!Array.isArray(entry.englishLearning)) {
+    entry.englishLearning = [];
+  }
+  if (typeof entry.pointsEarned !== 'number') {
+    entry.pointsEarned = 0;
   }
 
   // ── ASSERTION: entry structure ──
@@ -699,8 +727,10 @@ export function getOrCreateTodayEntry(data: GritData): DailyEntry {
   assert(Array.isArray(entry.reading), '[GET_TODAY] entry.reading must be an array');
   assert(Array.isArray(entry.learning), '[GET_TODAY] entry.learning must be an array');
   assert(Array.isArray(entry.coding), '[GET_TODAY] entry.coding must be an array');
+  assert(Array.isArray(entry.englishLearning), '[GET_TODAY] entry.englishLearning must be an array');
   assert(typeof entry.goodHabits === 'object', '[GET_TODAY] entry.goodHabits must be an object');
   assert(typeof entry.badHabits === 'object', '[GET_TODAY] entry.badHabits must be an object');
+  assert(typeof entry.pointsEarned === 'number', '[GET_TODAY] entry.pointsEarned must be a number');
 
   return entry;
 }
