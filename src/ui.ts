@@ -37,6 +37,38 @@ function toYesNo(value: boolean | undefined): string {
   return color.dim('Not logged');
 }
 
+function formatEnglishLog(log: DailyEntry['englishLearning'][number]): string {
+  if (log.type === 'video') {
+    return `Video${log.durationMinutes ? ` (${log.durationMinutes} min)` : ''}`;
+  }
+  if (log.type === 'book_grammar') {
+    return 'Grammar book';
+  }
+  if (log.type === 'book_vocabulary') {
+    return `Vocabulary${log.wordsCount ? ` (${log.wordsCount} words)` : ''}`;
+  }
+  return `Speaking AI${log.durationMinutes ? ` (${log.durationMinutes} min)` : ''}`;
+}
+
+function getDailyAchievementExtras(entry: DailyEntry): string[] {
+  const extras: string[] = [];
+  if (entry.englishLearning.length > 0) extras.push('English');
+  if (entry.goodHabits.didSport) extras.push('Sport');
+  if (entry.goodHabits.wokeUpEarly) extras.push('Wake early');
+  if (entry.badHabits.watchedPorn === false) extras.push('No porn');
+  if (entry.badHabits.entertainmentHours !== undefined && !entry.badHabits.entertainmentOveruse) {
+    extras.push('Entertainment in range');
+  }
+  return extras;
+}
+
+function renderRatioBar(done: number, total: number, width = 24): string {
+  if (total <= 0) return color.dim('No data');
+  const ratio = Math.max(0, Math.min(1, done / total));
+  const filled = Math.round(ratio * width);
+  return `${color.green('█'.repeat(filled))}${color.dim('░'.repeat(Math.max(0, width - filled)))}`;
+}
+
 function centerLine(text: string, width = process.stdout.columns || 100): string {
   const plain = text.replace(/\x1B\[[0-9;]*m/g, '');
   const left = Math.max(0, Math.floor((width - plain.length) / 2));
@@ -727,6 +759,11 @@ export async function showHistory(data: GritData, all: boolean): Promise<void> {
       console.log(`  💻 You coded on ${color.cyan(c.category)} — topic: ${color.white(c.topic)} (${timeStr})`);
     }
 
+    if (entry.englishLearning.length > 0) {
+      const englishSummary = entry.englishLearning.map(formatEnglishLog).join(', ');
+      console.log(`  🇬🇧 English — ${color.bold(entry.englishLearning.length.toString())} session(s): ${color.white(englishSummary)}`);
+    }
+
     if (entry.goodHabits && (entry.goodHabits.wokeUpEarly !== undefined || entry.goodHabits.didSport !== undefined)) {
       console.log(`  🌅 Good habits — woke up early: ${toYesNo(entry.goodHabits.wokeUpEarly)}${entry.goodHabits.wakeUpTime ? ` at ${color.cyan(entry.goodHabits.wakeUpTime)}` : ''}`);
       console.log(`  🏃 Good habits — did sport: ${toYesNo(entry.goodHabits.didSport)}${entry.goodHabits.sportMinutes ? ` (${entry.goodHabits.sportMinutes} min)` : ''}`);
@@ -750,7 +787,11 @@ export async function showHistory(data: GritData, all: boolean): Promise<void> {
       const statusText = entry.success
         ? color.green('SUCCESS')
         : color.red('MISSED');
-      console.log(`  ${statusEmoji} This day you completed ${color.bold(`${entry.score}/4`)} of the daily habits — ${statusText}`);
+      const extras = getDailyAchievementExtras(entry);
+      const extrasText = extras.length > 0
+        ? color.cyan(` (+ ${extras.join(', ')})`)
+        : color.dim(' (+ no extra habits)');
+      console.log(`  ${statusEmoji} This day you completed ${color.bold(`${entry.score}/4`)} core habits — ${statusText}${extrasText}`);
     }
 
     console.log(separator);
@@ -1456,12 +1497,22 @@ export function showStatistics(data: GritData, period: string): void {
 
   let wokeEarlyDays = 0;
   let wokeLoggedDays = 0;
+  let wakeEarlyMissedDays = 0;
   let sportDays = 0;
+  let sportTrackedDays = 0;
   let sportMinutes = 0;
+
+  let englishSessions = 0;
+  let englishDays = 0;
+  let englishMinutes = 0;
+  let englishWords = 0;
 
   let pornDays = 0;
   let pornLoggedDays = 0;
+  let noPornDays = 0;
   let entertainmentHoursTotal = 0;
+  let entertainmentLoggedDays = 0;
+  let entertainmentInRangeDays = 0;
   let overuseDays = 0;
 
   const problemTopics = new Map<string, number>();
@@ -1498,16 +1549,32 @@ export function showStatistics(data: GritData, period: string): void {
     if (e.goodHabits.wokeUpEarly !== undefined) {
       wokeLoggedDays++;
       if (e.goodHabits.wokeUpEarly) wokeEarlyDays++;
+      else wakeEarlyMissedDays++;
     }
+    if (e.goodHabits.didSport !== undefined) sportTrackedDays++;
     if (e.goodHabits.didSport) sportDays++;
     sportMinutes += e.goodHabits.sportMinutes || 0;
+
+    if (e.englishLearning.length > 0) {
+      englishDays++;
+      englishSessions += e.englishLearning.length;
+      for (const eng of e.englishLearning) {
+        englishMinutes += eng.durationMinutes || 0;
+        englishWords += eng.wordsCount || 0;
+      }
+    }
 
     if (e.badHabits.watchedPorn !== undefined) {
       pornLoggedDays++;
       if (e.badHabits.watchedPorn) pornDays++;
+      else noPornDays++;
     }
-    entertainmentHoursTotal += e.badHabits.entertainmentHours || 0;
-    if (e.badHabits.entertainmentOveruse) overuseDays++;
+    if (e.badHabits.entertainmentHours !== undefined) {
+      entertainmentLoggedDays++;
+      entertainmentHoursTotal += e.badHabits.entertainmentHours;
+      if (e.badHabits.entertainmentOveruse) overuseDays++;
+      else entertainmentInRangeDays++;
+    }
   }
 
   const top = (map: Map<string, number>, limit = 5): string => {
@@ -1537,6 +1604,7 @@ export function showStatistics(data: GritData, period: string): void {
     `Tracked days: ${entries.length}\n` +
     `Active days: ${activeDays}\n` +
     `Successful days (>=3/4): ${successDays}\n` +
+    `English days: ${englishDays} | Sport days: ${sportDays}\n` +
     `Current streak: ${data.stats.currentStreak} | Highest streak: ${data.stats.highestStreak}`;
   console.log(boxen(executive, {
     title: 'Company Dashboard',
@@ -1554,7 +1622,8 @@ export function showStatistics(data: GritData, period: string): void {
     `🧩 Problems solved: ${totalProblems}\n` +
     `📚 Reading sessions: ${totalReading}\n` +
     `🎓 Learning time: ${learningHours}h ${learningRestMin}m\n` +
-    `💻 Coding time: ${codingHours}h ${codingRestMin}m\n\n` +
+    `💻 Coding time: ${codingHours}h ${codingRestMin}m\n` +
+    `🇬🇧 English sessions: ${englishSessions} (${englishMinutes} min, ${englishWords} words)\n\n` +
     `${color.bold('Top Topics & Areas')}\n` +
     `Problem topics: ${top(problemTopics)}\n` +
     `Reading categories: ${top(readingCategories)}\n` +
@@ -1570,11 +1639,14 @@ export function showStatistics(data: GritData, period: string): void {
   }));
 
   const goodRate = wokeLoggedDays > 0 ? Math.round((wokeEarlyDays / wokeLoggedDays) * 100) : 0;
+  const sportRate = sportTrackedDays > 0 ? Math.round((sportDays / sportTrackedDays) * 100) : 0;
   const goodHabits =
     `${color.bold('🌅 Good Habits')}\n` +
     `Wake-up tracked days: ${wokeLoggedDays}\n` +
     `Woke up early: ${wokeEarlyDays} day(s) (${goodRate}%)\n` +
-    `Sport days: ${sportDays}\n` +
+    `Wake-up missed: ${wakeEarlyMissedDays} day(s)\n` +
+    `Sport tracked days: ${sportTrackedDays}\n` +
+    `Sport days: ${sportDays} (${sportRate}%)\n` +
     `Total sport time: ${sportMinutes} min`;
   console.log(boxen(goodHabits, {
     title: 'Wellness Section',
@@ -1587,13 +1659,17 @@ export function showStatistics(data: GritData, period: string): void {
   }));
 
   const pornRate = pornLoggedDays > 0 ? Math.round((pornDays / pornLoggedDays) * 100) : 0;
-  const avgEntertainment = entries.length > 0 ? (entertainmentHoursTotal / entries.length) : 0;
+  const noPornRate = pornLoggedDays > 0 ? Math.round((noPornDays / pornLoggedDays) * 100) : 0;
+  const avgEntertainment = entertainmentLoggedDays > 0 ? (entertainmentHoursTotal / entertainmentLoggedDays) : 0;
   const badHabits =
     `${color.bold('🚫 Bad Habits Reflection')}\n` +
     `Porn check-ins: ${pornLoggedDays}\n` +
     `Porn positive days: ${pornDays} (${pornRate}%)\n` +
+    `Porn-free days: ${noPornDays} (${noPornRate}%)\n` +
     `Entertainment total: ${entertainmentHoursTotal.toFixed(1)}h\n` +
     `Entertainment average/day: ${avgEntertainment.toFixed(2)}h\n` +
+    `Entertainment tracked days: ${entertainmentLoggedDays}\n` +
+    `Entertainment in range (<=4h): ${entertainmentInRangeDays}\n` +
     `Overuse days (>4h): ${overuseDays}`;
   console.log(boxen(badHabits, {
     title: 'Risk Section',
@@ -1602,6 +1678,28 @@ export function showStatistics(data: GritData, period: string): void {
     margin: { top: 1, bottom: 1 },
     borderStyle: 'round',
     borderColor: 'red',
+    float: 'center'
+  }));
+
+  const trackedDays = entries.length;
+  const allHabitsOverview =
+    `${color.bold('🧭 Habit Consistency Graph')}\n` +
+    `🧩 Problem Solving  ${renderRatioBar(entries.filter(e => e.problemSolving.length > 0).length, trackedDays)} ${entries.filter(e => e.problemSolving.length > 0).length}/${trackedDays}\n` +
+    `📚 Reading          ${renderRatioBar(entries.filter(e => e.reading.length > 0).length, trackedDays)} ${entries.filter(e => e.reading.length > 0).length}/${trackedDays}\n` +
+    `🎓 Learning         ${renderRatioBar(entries.filter(e => e.learning.length > 0).length, trackedDays)} ${entries.filter(e => e.learning.length > 0).length}/${trackedDays}\n` +
+    `💻 Coding           ${renderRatioBar(entries.filter(e => e.coding.length > 0).length, trackedDays)} ${entries.filter(e => e.coding.length > 0).length}/${trackedDays}\n` +
+    `🇬🇧 English          ${renderRatioBar(englishDays, trackedDays)} ${englishDays}/${trackedDays}\n` +
+    `🌅 Wake Early       ${renderRatioBar(wokeEarlyDays, wokeLoggedDays)} ${wokeEarlyDays}/${wokeLoggedDays || 0} tracked\n` +
+    `🏃 Sport            ${renderRatioBar(sportDays, sportTrackedDays)} ${sportDays}/${sportTrackedDays || 0} tracked\n` +
+    `🛡️ No Porn          ${renderRatioBar(noPornDays, pornLoggedDays)} ${noPornDays}/${pornLoggedDays || 0} tracked\n` +
+    `🎮 In-Range Entert. ${renderRatioBar(entertainmentInRangeDays, entertainmentLoggedDays)} ${entertainmentInRangeDays}/${entertainmentLoggedDays || 0} tracked`;
+  console.log(boxen(allHabitsOverview, {
+    title: 'All Habits Overview',
+    titleAlignment: 'center',
+    padding: { top: 1, bottom: 1, left: 3, right: 3 },
+    margin: { top: 1, bottom: 1 },
+    borderStyle: 'round',
+    borderColor: 'yellow',
     float: 'center'
   }));
 }
